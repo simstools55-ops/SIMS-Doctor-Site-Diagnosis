@@ -6,7 +6,8 @@ function sdsdEnsureSheets_() {
     SDSD_CONFIG.sheets.evidencePageQuery,
     SDSD_CONFIG.sheets.sbmHistory,
     SDSD_CONFIG.sheets.candidates,
-    SDSD_CONFIG.sheets.selectedCases
+    SDSD_CONFIG.sheets.selectedCases,
+    SDSD_CONFIG.sheets.articleMaster
   ];
   names.forEach(name => {
     let sh = ss.getSheetByName(name);

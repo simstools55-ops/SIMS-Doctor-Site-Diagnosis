@@ -12,6 +12,10 @@ function onOpen() {
     .addItem('8. Build Treatment Batch', 'sdsdBuildTreatmentBatch')
     .addItem('9. Run Final Guard', 'sdsdRunFinalGuard')
     .addItem('10. Open Selected Cases', 'sdsdOpenSelectedCases')
+    .addSeparator()
+    .addItem('11. Article Master Import Help', 'sdsdArticleMasterImportHelp')
+    .addItem('12. Enrich Selected Cases', 'sdsdEnrichSelectedCases')
+    .addItem('13. Export Doctor Case Package ZIP', 'sdsdExportDoctorCasePackageZip')
     .addToUi();
 }
 

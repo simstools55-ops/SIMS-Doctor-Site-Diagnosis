@@ -1,4 +1,4 @@
-const SDSD_VERSION = '0.3.0-Sprint3';
+const SDSD_VERSION = '0.3.1-Sprint3';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -7,7 +7,8 @@ const SDSD_CONFIG = Object.freeze({
     evidencePageQuery: '_SDSD_PAGE_QUERY_TOP',
     sbmHistory: '_SDSD_SBM_HISTORY',
     candidates: 'Site Diagnosis Candidates',
-    selectedCases: 'Selected Treatment Cases'
+    selectedCases: 'Selected Treatment Cases',
+    articleMaster: '_SDSD_ARTICLE_MASTER'
   },
   score: {
     demandMax: 30,

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1-Sprint3
+- Added SBM Article Master import support.
+- Added ArticleID/title/main-query enrichment.
+- Added live article HTML retrieval from selected URLs.
+- Case Package V1 now embeds current article evidence.
+- Added fail-visible BODY_NOT_FOUND / FETCH_ERROR handling.
+- Added batch ZIP export for Individual Doctor cases.
+- Added Drive and external-request scopes required for export/fetch.
+
 ## 0.3.0-Sprint3
 - Added site-size treatment capacity policy.
 - Added automatic A1/A2 treatment batch selection.
