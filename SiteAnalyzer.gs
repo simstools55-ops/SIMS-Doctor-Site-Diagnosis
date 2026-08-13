@@ -13,11 +13,20 @@ function sdsdRunAnalysis() {
     const guard = sdsdRecentTreatmentGuard_(x.url, historyMap);
 
     let priority = 'CANDIDATE';
-    if (guard.status === 'WAIT') priority = 'WAIT';
-    else if (own.ownership === 'SBM_OWNED') priority = 'SBM';
-    else if (x.tvs >= 70) priority = 'A1_CANDIDATE';
-    else if (x.tvs >= 60) priority = 'A2_CANDIDATE';
-    else if (x.tvs >= 50) priority = 'B_CANDIDATE';
+    if (guard.status === 'WAIT') {
+      priority = 'WAIT';
+    } else if (own.ownership === 'SBM_OWNED') {
+      priority = 'SBM';
+    } else if (own.ownership === 'REVIEW') {
+      priority = 'REVIEW';
+    } else if (own.ownership === 'DOCTOR_OWNED') {
+      if (x.tvs >= 70) priority = 'A1_CANDIDATE';
+      else if (x.tvs >= 60) priority = 'A2_CANDIDATE';
+      else if (x.tvs >= 50) priority = 'B_CANDIDATE';
+      else priority = 'CANDIDATE';
+    } else {
+      priority = 'REVIEW';
+    }
 
     return Object.assign({}, x, {
       ownership: own.ownership,

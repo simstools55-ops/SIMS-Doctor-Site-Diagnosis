@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-Sprint1-Hotfix3
+- Fixed priority conversion so REVIEW ownership cannot be promoted to A1/A2/B by TVS alone.
+- Priority order is now WAIT -> SBM -> REVIEW -> DOCTOR_OWNED TVS classification.
+- No scoring, Article Universe, Ownership, or Recent Treatment Guard logic changed.
+
+# Changelog
+
 ## 0.1.0-Sprint1-Hotfix2
 - Added Article Universe gate before TVS scoring.
 - Primary universe source is Collector RC5 page_query_top.

@@ -1,4 +1,4 @@
-const SDSD_VERSION = '0.1.0-Sprint1-Hotfix2';
+const SDSD_VERSION = '0.1.0-Sprint1-Hotfix3';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
