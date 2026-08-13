@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0-RC4
+
+- Site Diagnosis Case Package に独立した `request_id` を必須発行。
+- `case_id` / `request_id` / `site_diagnosis_case_id` / `site_diagnosis_batch_id` / `site_id` / `article_id` / `article_url` をトップレベルにも固定出力。
+- 既存 `case_identity` は後方互換のため維持。
+- ZIP manifest に各案件の `request_id` を追加。
+- Export時に `request_id` 欠落をCase Identity不備としてブロック。
+- `SDSD_VERSION` と `VERSION` の不整合を解消し、0.4.0-RC4へ同期。
+
 ## 0.4.0-RC3
 
 - Recent Treatment GuardがSBM現行「改善履歴」の `改善実施日` を認識できず、直近処置済み記事をPASSしていた不具合を修正。

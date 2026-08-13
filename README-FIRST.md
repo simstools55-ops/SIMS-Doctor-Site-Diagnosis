@@ -72,3 +72,8 @@ Collector側のStep 5 / Evidence再生成を確認してください。
 このZIPはGitHub上書き用のクリーンRCです。
 過去SprintのAPPLY文書・Hotfix適用メモは配布物から除外しています。
 ファイル名はASCII英数字表記を使用しています。
+
+## RC4 Identity Contract
+
+Case Packageは `request_id` を含む7つの主要Identityをトップレベルへ固定出力します。Doctorはこれらを再生成せず、そのまま診断結果へ継承してください。
+

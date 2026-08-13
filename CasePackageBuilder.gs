@@ -107,6 +107,20 @@ function sdsdEnrichSelectedCases() {
     referral.case_identity.site_id = siteId;
     referral.case_identity.article_id = articleId;
     referral.case_identity.url = url;
+    referral.case_identity.request_id = String(
+      referral.case_identity.request_id || referral.request_id || sdsdBuildRequestId_(batchId, articleId)
+    );
+
+    // Identity Contract: keep canonical identifiers at the top level as well as
+    // case_identity for backward compatibility. Doctor must inherit these values
+    // unchanged into SIMS_DOCTOR_CASE_RESULT_V2.
+    referral.case_id = referral.case_identity.individual_case_id;
+    referral.request_id = referral.case_identity.request_id;
+    referral.site_diagnosis_case_id = referral.case_identity.site_diagnosis_case_id;
+    referral.site_diagnosis_batch_id = batchId;
+    referral.site_id = siteId;
+    referral.article_id = articleId;
+    referral.article_url = url;
 
     // IMPORTANT: article_html is deliberately NOT stored in the sheet.
     referral.article_evidence = {
@@ -223,12 +237,14 @@ function sdsdExportDoctorCasePackageZip() {
     ));
 
     const identity = parsed.case_identity || {};
-    if (!identity.site_diagnosis_case_id || !identity.individual_case_id || !identity.site_id) {
+    const requestId = String(parsed.request_id || identity.request_id || '');
+    if (!identity.site_diagnosis_case_id || !identity.individual_case_id || !identity.site_id || !requestId) {
       throw new Error(`Case Identityが不完全です: ${articleId}`);
     }
 
     manifestCases.push({
       order: i+1,
+      request_id: requestId,
       site_diagnosis_case_id: String(identity.site_diagnosis_case_id),
       individual_case_id: String(identity.individual_case_id),
       site_id: String(identity.site_id),

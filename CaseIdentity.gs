@@ -36,6 +36,12 @@ function sdsdBuildIndividualCaseId_(batchId, articleId) {
   return `CASE-${batchId}-${String(articleId).replace(/[^A-Za-z0-9._-]/g, '_')}`;
 }
 
+function sdsdBuildRequestId_(batchId, articleId) {
+  if (!batchId) throw new Error('Site Diagnosis Batch ID がありません。Treatment Batchを作り直してください。');
+  if (!articleId) throw new Error('ArticleID がないため Request ID を生成できません。');
+  return `REQ-${batchId}-${String(articleId).replace(/[^A-Za-z0-9._-]/g, '_')}`;
+}
+
 function sdsdSiteIdFromMaster_(master) {
   if (!master || !master.raw) return '';
   const r = master.raw;
