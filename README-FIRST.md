@@ -1,17 +1,64 @@
-# SIMS Doctor Site Diagnosis v0.1.0 Sprint 1
+# SIMS Doctor Site Diagnosis v0.4.0-RC1
 
-Sprint 1 implements the first vertical slice:
+## 目的
 
-1. Import Compact Evidence produced by SIMS Doctor Site Collector RC5
-2. Import SBM treatment history CSV
-3. Normalize article URLs
-4. Calculate Treatment Value Score V1
-5. Apply Treatment Ownership preliminary rules
-6. Apply Recent Treatment Guard
-7. Export a ranked site-diagnosis candidate list
+SIMS Doctor Site Collector が生成したサイト全体の Evidence Package と、
+SIMS-Blog-Manager（SBM）の改善履歴・記事情報を統合し、
+Doctor が精密診断すべき記事をサイト規模に応じて選定して
+Individual Doctor Case Package ZIP を生成します。
 
-This Sprint intentionally does NOT generate Individual Doctor case packages yet.
+## 実証済みフロー
 
+1. Site Collector の Evidence Package ZIP をGoogle Driveから直接読み込む
+2. SBM改善履歴を反映する
+3. サイト全体を分析する
+4. 週次トレンド・Evidence Confidence・Treatment Riskを評価する
+5. SBMの日常改善とDoctor治療の重複を防止する
+6. サイト規模に応じてDoctor候補を絞り込む
+7. Final Guardで直近処置を再確認する
+8. SBM Article MasterでArticleID・タイトル・メインクエリを補完する
+9. 記事本文を取得してCase Enrichmentする
+10. 各案件へ上位10検索クエリを clicks / impressions / CTR / position 付きで付与する
+11. Doctor Case Package ZIPを生成する
 
-## Sprint 2
-Adds weekly trend, evidence confidence, treatment risk, external-factor flags and a second-stage priority gate.
+## v0.4.0-RC1 実運用検証
+
+tonbos55（428記事規模）でEnd-to-End検証済み。
+
+- Doctor選定案件: 18件
+- Article Fetch Status: 全18件 VALID
+- Case Package Status: 全18件 READY
+- Query Evidence: 全18件に上位10クエリ
+- Final Guard block: 0件
+- 最終ZIP: manifest.json 1件 + case.json 18件 + article.html 18件 = 37ファイル
+- 空本文・Query Evidence欠損・manifest不整合: 0件
+
+## メニュー
+
+1. 初期化
+2. Evidence Package ZIPを読み込む
+3. SBM改善履歴を取り込む
+4. サイト分析を実行
+5. 診断候補を開く
+6. 週次トレンドを検証
+7. 最終優先度を検証
+8. 治療バッチを作成
+9. Final Guardを実行
+10. 選定案件を開く
+11. Article Master取込案内
+12. Case Enrichmentを実行
+13. Doctor Case Package ZIPを生成
+
+Query Evidence診断は保守メニューとして残しています。
+
+## Evidence Package
+
+Site Collector側でStep 5（ページ別上位クエリ）が完了したEvidence Packageを使用してください。
+取込完了画面で `page_query_top` が0行の場合はサイト分析を続行せず、
+Collector側のStep 5 / Evidence再生成を確認してください。
+
+## 配布方針
+
+このZIPはGitHub上書き用のクリーンRCです。
+過去SprintのAPPLY文書・Hotfix適用メモは配布物から除外しています。
+ファイル名はASCII英数字表記を使用しています。

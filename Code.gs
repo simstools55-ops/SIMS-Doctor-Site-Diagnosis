@@ -1,22 +1,23 @@
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('SIMS Doctor Site Diagnosis')
-    .addItem('1. Initialize', 'sdsdInitialize')
-    .addItem('2. Import Evidence Package ZIP', 'sdsdImportEvidencePackageZip')
-    .addItem('3. Import SBM History CSV', 'sdsdImportHistoryHelp')
-    .addItem('4. Run Site Analysis', 'sdsdRunAnalysis')
-    .addItem('5. Open Candidates', 'sdsdOpenCandidates')
-    .addItem('6. Validate Weekly Trends', 'sdsdValidateWeeklyTrends')
-    .addItem('7. Validate Final Priorities', 'sdsdValidateFinalPriorities')
+    .addItem('1. 初期化', 'sdsdInitialize')
+    .addItem('2. Evidence Package ZIPを読み込む', 'sdsdImportEvidencePackageZip')
+    .addItem('3. SBM改善履歴を取り込む', 'sdsdImportHistoryHelp')
+    .addItem('4. サイト分析を実行', 'sdsdRunAnalysis')
+    .addItem('5. 診断候補を開く', 'sdsdOpenCandidates')
+    .addItem('6. 週次トレンドを検証', 'sdsdValidateWeeklyTrends')
+    .addItem('7. 最終優先度を検証', 'sdsdValidateFinalPriorities')
     .addSeparator()
-    .addItem('8. Build Treatment Batch', 'sdsdBuildTreatmentBatch')
-    .addItem('9. Run Final Guard', 'sdsdRunFinalGuard')
-    .addItem('10. Open Selected Cases', 'sdsdOpenSelectedCases')
+    .addItem('8. 治療バッチを作成', 'sdsdBuildTreatmentBatch')
+    .addItem('9. Final Guardを実行', 'sdsdRunFinalGuard')
+    .addItem('10. 選定案件を開く', 'sdsdOpenSelectedCases')
     .addSeparator()
-    .addItem('11. Article Master Import Help', 'sdsdArticleMasterImportHelp')
-    .addItem('12. Enrich Selected Cases', 'sdsdEnrichSelectedCases')
-    .addItem('13. Diagnose Query Evidence Input', 'sdsdDiagnoseQueryEvidenceInput')
-    .addItem('14. Export Doctor Case Package ZIP', 'sdsdExportDoctorCasePackageZip')
+    .addItem('11. Article Master取込案内', 'sdsdArticleMasterImportHelp')
+    .addItem('12. Case Enrichmentを実行', 'sdsdEnrichSelectedCases')
+    .addItem('13. Doctor Case Package ZIPを生成', 'sdsdExportDoctorCasePackageZip')
+    .addSeparator()
+    .addItem('保守: Query Evidenceを診断', 'sdsdDiagnoseQueryEvidenceInput')
     .addToUi();
 }
 
@@ -27,13 +28,6 @@ function sdsdInitialize() {
   );
 }
 
-function sdsdImportEvidenceHelp() {
-  SpreadsheetApp.getUi().alert(
-    'Sprint 1では、Evidence ZIP内の page_summary.csv / page_weekly.csv / page_query_top.csv を\n' +
-    '対応する非表示シートへ貼り付けてから分析します。\n\n' +
-    '次SprintでZIP直接読込へ置き換える予定です。'
-  );
-}
 
 function sdsdImportHistoryHelp() {
   SpreadsheetApp.getUi().alert(
