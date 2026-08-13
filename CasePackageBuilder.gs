@@ -94,6 +94,17 @@ function sdsdEnrichSelectedCases() {
     referral.format = 'SIMS_DOCTOR_INDIVIDUAL_CASE_PACKAGE_V1';
     referral.contract_version = '1.0';
     referral.case_identity = referral.case_identity || {};
+    const batchId = String(referral.site_diagnosis_batch_id || sdsdGetActiveBatchId_() || '');
+    const siteId = sdsdResolveSiteId_(master, url);
+
+    referral.site_diagnosis_batch_id = batchId;
+    referral.case_identity.site_diagnosis_case_id = String(
+      referral.case_identity.site_diagnosis_case_id || sdsdBuildSiteDiagnosisCaseId_(batchId, url)
+    );
+    referral.case_identity.individual_case_id = String(
+      referral.case_identity.individual_case_id || sdsdBuildIndividualCaseId_(batchId, articleId)
+    );
+    referral.case_identity.site_id = siteId;
     referral.case_identity.article_id = articleId;
     referral.case_identity.url = url;
 
@@ -211,8 +222,16 @@ function sdsdExportDoctorCasePackageZip() {
       `${folder}/article.html`
     ));
 
+    const identity = parsed.case_identity || {};
+    if (!identity.site_diagnosis_case_id || !identity.individual_case_id || !identity.site_id) {
+      throw new Error(`Case Identityが不完全です: ${articleId}`);
+    }
+
     manifestCases.push({
       order: i+1,
+      site_diagnosis_case_id: String(identity.site_diagnosis_case_id),
+      individual_case_id: String(identity.individual_case_id),
+      site_id: String(identity.site_id),
       article_id: articleId,
       url: url,
       priority: String(r[idx['Site Priority']] || ''),
@@ -222,9 +241,21 @@ function sdsdExportDoctorCasePackageZip() {
     });
   });
 
+  const batchIds = rows.map(r => {
+    try {
+      const p = JSON.parse(String(r[idx['Referral JSON']] || '{}'));
+      return String(p.site_diagnosis_batch_id || '');
+    } catch(e) { return ''; }
+  }).filter(Boolean);
+  const uniqueBatchIds = [...new Set(batchIds)];
+  if (uniqueBatchIds.length !== 1) {
+    throw new Error(`Treatment Batch IDが一意ではありません: ${uniqueBatchIds.join(', ')}`);
+  }
+
   const manifest = {
     format: 'SIMS_DOCTOR_SITE_TREATMENT_BATCH_V1',
-    contract_version: '1.0',
+    contract_version: '1.1',
+    site_diagnosis_batch_id: uniqueBatchIds[0],
     generated_at: new Date().toISOString(),
     case_count: rows.length,
     cases: manifestCases

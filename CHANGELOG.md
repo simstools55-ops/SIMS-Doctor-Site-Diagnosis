@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0-RC2
+
+- Doctor Case PackageのCase Identity欠落を修正。
+- `site_diagnosis_batch_id` をTreatment Batch単位で発行。
+- `site_diagnosis_case_id` / `individual_case_id` / `site_id` をCase Enrichmentで確定。
+- SBM Article MasterのSiteIDを優先し、無い場合のみURLからsite_idを補完。
+- Identity欠損時はDoctor Case Package ZIP生成を停止するfail-closed guardを追加。
+- manifest contractを1.1へ更新し、Batch IDと各Case Identityを格納。
+
 ## 0.4.0-RC1
 
 - Sprint 3 End-to-End実運用試験を完了。

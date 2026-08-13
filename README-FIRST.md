@@ -1,4 +1,4 @@
-# SIMS Doctor Site Diagnosis v0.4.0-RC1
+# SIMS Doctor Site Diagnosis v0.4.0-RC2
 
 ## 目的
 
@@ -20,6 +20,16 @@ Individual Doctor Case Package ZIP を生成します。
 9. 記事本文を取得してCase Enrichmentする
 10. 各案件へ上位10検索クエリを clicks / impressions / CTR / position 付きで付与する
 11. Doctor Case Package ZIPを生成する
+
+
+## v0.4.0-RC2 Case Identity Hotfix
+
+- Treatment Batch作成時に `site_diagnosis_batch_id` を発行・保持します。
+- 各Case Packageに `site_diagnosis_case_id` / `individual_case_id` / `site_id` を必須設定します。
+- `site_id` はSBM Article MasterのSiteIDを最優先し、存在しない場合のみURLから決定論的に補完します。
+- ZIP生成時にIdentity欠損をfail-closedで検出します。
+- `manifest.json` にも3つのCase IdentityとBatch IDを保存します。
+- DoctorはこれらのIDを生成せず、Case Packageの値をそのまま返却する前提です。
 
 ## v0.4.0-RC1 実運用検証
 

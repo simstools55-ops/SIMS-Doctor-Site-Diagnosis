@@ -38,6 +38,7 @@ function sdsdBuildTreatmentBatch() {
 
   const queryMap = sdsdBuildQueryEvidenceMap_();
   const historyMap = sdsdBuildHistoryMap_();
+  const batchId = sdsdCreateBatchId_();
 
   let out = ss.getSheetByName(SDSD_CONFIG.sheets.selectedCases);
   if (!out) out = ss.insertSheet(SDSD_CONFIG.sheets.selectedCases);
@@ -59,9 +60,9 @@ function sdsdBuildTreatmentBatch() {
       format: 'SIMS_DOCTOR_INDIVIDUAL_CASE_PACKAGE_V1',
       contract_version: '1.0-draft',
       case_identity: {
-        site_diagnosis_case_id: '',
+        site_diagnosis_case_id: sdsdBuildSiteDiagnosisCaseId_(batchId, url),
         individual_case_id: '',
-        site_id: '',
+        site_id: sdsdSiteIdFromUrl_(url),
         article_id: '',
         url: url
       },
@@ -93,7 +94,8 @@ function sdsdBuildTreatmentBatch() {
         status: 'NOT_ATTACHED_IN_SPRINT3',
         note: 'Article body / ArticleID will be attached by the SBM/Case Packager integration.'
       },
-      site_doctor_expected_route: 'INDIVIDUAL_DOCTOR'
+      site_doctor_expected_route: 'INDIVIDUAL_DOCTOR',
+      site_diagnosis_batch_id: batchId
     };
 
     return [
