@@ -15,7 +15,8 @@ function onOpen() {
     .addSeparator()
     .addItem('11. Article Master Import Help', 'sdsdArticleMasterImportHelp')
     .addItem('12. Enrich Selected Cases', 'sdsdEnrichSelectedCases')
-    .addItem('13. Export Doctor Case Package ZIP', 'sdsdExportDoctorCasePackageZip')
+    .addItem('13. Diagnose Query Evidence Input', 'sdsdDiagnoseQueryEvidenceInput')
+    .addItem('14. Export Doctor Case Package ZIP', 'sdsdExportDoctorCasePackageZip')
     .addToUi();
 }
 
