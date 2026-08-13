@@ -1,7 +1,8 @@
 function sdsdRunAnalysis() {
   sdsdEnsureSheets_();
 
-  const evidenceMap = sdsdBuildEvidenceMap_();
+  const evidence = sdsdBuildEvidenceMap_();
+  const evidenceMap = evidence.map;
   const historyMap = sdsdBuildHistoryMap_();
   const items = Object.keys(evidenceMap).map(k => evidenceMap[k]);
 
@@ -30,7 +31,8 @@ function sdsdRunAnalysis() {
   sdsdWriteCandidates_(scored);
 
   SpreadsheetApp.getUi().alert(
-    `Site Analysis完了\n対象URL: ${scored.length}\n` +
+    `Site Analysis完了\n対象記事: ${scored.length}\n` +
+    `Article Universe: ${evidence.universeCount} (${evidence.universeStrategy})\n` +
     `上位候補を「${SDSD_CONFIG.sheets.candidates}」へ出力しました。`
   );
 }
