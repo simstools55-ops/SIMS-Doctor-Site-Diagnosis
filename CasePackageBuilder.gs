@@ -17,13 +17,16 @@ function sdsdEnrichSelectedCases() {
   headers.forEach((h,i) => idx[h] = i);
 
   const articleMap = sdsdBuildArticleMasterMap_();
+  const queryMap = sdsdBuildQueryEvidenceMap_();
+  const querySourceCount = sdsdQueryEvidenceSourceCount_();
+
   if (!Object.keys(articleMap).length) {
     throw new Error('記事管理データがありません。_SDSD_ARTICLE_MASTERへSBM「記事管理」CSVを入れてください。');
   }
 
   const extraHeaders = [
     'ArticleID','Article Title','Main Query','Article Fetch Status',
-    'Case Package Status','Article Cache Key'
+    'Case Package Status','Article Cache Key','Query Evidence Count'
   ];
   let lastCol = headers.length;
   extraHeaders.forEach(h => {
@@ -47,15 +50,28 @@ function sdsdEnrichSelectedCases() {
     const articleId = master ? master.articleId : '';
     const title = master ? master.title : '';
     const mainQuery = master ? master.mainQuery : '';
+    const queryEvidence = (queryMap[sdsdNormalizeUrl_(url)] || []).slice(0,10);
     const fetched = sdsdFetchArticleEvidence_(url);
 
     sh.getRange(r+1, idx['ArticleID']+1).setValue(articleId);
     sh.getRange(r+1, idx['Article Title']+1).setValue(title || fetched.title);
     sh.getRange(r+1, idx['Main Query']+1).setValue(mainQuery);
     sh.getRange(r+1, idx['Article Fetch Status']+1).setValue(fetched.status);
+    sh.getRange(r+1, idx['Query Evidence Count']+1).setValue(queryEvidence.length);
 
-    if (!master || !articleId || fetched.status !== 'VALID') {
-      sh.getRange(r+1, idx['Case Package Status']+1).setValue('NEEDS_REVIEW');
+    if (idx['Top Queries'] != null) {
+      sh.getRange(r+1, idx['Top Queries']+1).setValue(
+        queryEvidence.map(q => q.query).join(' / ')
+      );
+    }
+
+    if (!master || !articleId || fetched.status !== 'VALID' ||
+        (querySourceCount > 0 && queryEvidence.length === 0)) {
+      let reviewReason = 'NEEDS_REVIEW';
+      if (querySourceCount > 0 && queryEvidence.length === 0) {
+        reviewReason = 'QUERY_EVIDENCE_MISSING';
+      }
+      sh.getRange(r+1, idx['Case Package Status']+1).setValue(reviewReason);
       sh.getRange(r+1, idx['Referral Status']+1).setValue('NEEDS_CASE_ENRICHMENT_REVIEW');
       failed++;
       continue;
@@ -92,6 +108,17 @@ function sdsdEnrichSelectedCases() {
       body_storage: cached ? 'DOCUMENT_CACHE' : 'REFETCH_ON_EXPORT',
       fetched_at: new Date().toISOString()
     };
+
+    referral.search_evidence = referral.search_evidence || {};
+    referral.search_evidence.evidence_window_days = 120;
+    referral.search_evidence.top_queries = queryEvidence.map(q => ({
+      query: q.query,
+      clicks: q.clicks,
+      impressions: q.impressions,
+      ctr: q.ctr,
+      position: q.position
+    }));
+    referral.search_evidence.query_count = queryEvidence.length;
 
     referral.required_examinations = [
       '記事本文全文を読み、Site Referralの仮説を独立に検証する',

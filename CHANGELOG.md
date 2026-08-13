@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.3-Sprint3-Query-Evidence-Hotfix
+- Fixed missing per-case Search Query Evidence in Doctor Case Packages.
+- Query evidence is re-read from `_SDSD_PAGE_QUERY_TOP` during Case Enrichment.
+- Added tolerant CSV header handling including BOM/whitespace/case differences.
+- Stores up to 10 top queries with clicks, impressions, CTR and position.
+- Selected Treatment Cases now shows query count and top-query text.
+- Fail-closed: a case cannot become READY when query source data exists but its query evidence resolves to zero.
+
 ## 0.3.1-Sprint3
 - Added SBM Article Master import support.
 - Added ArticleID/title/main-query enrichment.
