@@ -1,4 +1,4 @@
-const SDSD_VERSION = '0.3.4-Sprint3-Query-Diagnostics';
+const SDSD_VERSION = '0.3.5-Sprint3-Evidence-ZIP-Import';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {

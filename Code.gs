@@ -2,7 +2,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('SIMS Doctor Site Diagnosis')
     .addItem('1. Initialize', 'sdsdInitialize')
-    .addItem('2. Import Evidence CSVs', 'sdsdImportEvidenceHelp')
+    .addItem('2. Import Evidence Package ZIP', 'sdsdImportEvidencePackageZip')
     .addItem('3. Import SBM History CSV', 'sdsdImportHistoryHelp')
     .addItem('4. Run Site Analysis', 'sdsdRunAnalysis')
     .addItem('5. Open Candidates', 'sdsdOpenCandidates')

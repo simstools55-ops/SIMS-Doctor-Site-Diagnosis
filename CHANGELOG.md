@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.5-Sprint3-Evidence-ZIP-Import
+- Added direct import of Collector Evidence ZIP from Google Drive.
+- Automatically imports page_summary.csv, page_weekly.csv, and page_query_top.csv.
+- Removes the need to manually paste the three Evidence CSVs.
+- Adds post-import Query Evidence integrity counts.
+- Existing Site Analysis / Treatment Batch / Case Package logic is unchanged.
+
 ## 0.3.3-Sprint3-Query-Evidence-Hotfix
 - Fixed missing per-case Search Query Evidence in Doctor Case Packages.
 - Query evidence is re-read from `_SDSD_PAGE_QUERY_TOP` during Case Enrichment.
