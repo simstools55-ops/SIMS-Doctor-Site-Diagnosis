@@ -1,4 +1,4 @@
-# SIMS Doctor Site Diagnosis v0.4.0-RC2
+# SIMS Doctor Site Diagnosis v0.4.0-RC4
 
 ## 目的
 
