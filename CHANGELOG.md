@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0-Sprint2
+- Added weekly trend classification.
+- Added Evidence Confidence.
+- Added Treatment Risk.
+- Added external-factor flags from page query evidence.
+- Added PROTECTED for growth cases.
+- Added DOCTOR_REVIEW for unresolved high-value/review cases.
+- Expanded candidate output columns.
+
 ## 0.1.0-Sprint1-Hotfix3
 - Fixed priority conversion so REVIEW ownership cannot be promoted to A1/A2/B by TVS alone.
 - Priority order is now WAIT -> SBM -> REVIEW -> DOCTOR_OWNED TVS classification.

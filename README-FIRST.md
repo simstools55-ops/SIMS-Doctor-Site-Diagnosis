@@ -11,3 +11,7 @@ Sprint 1 implements the first vertical slice:
 7. Export a ranked site-diagnosis candidate list
 
 This Sprint intentionally does NOT generate Individual Doctor case packages yet.
+
+
+## Sprint 2
+Adds weekly trend, evidence confidence, treatment risk, external-factor flags and a second-stage priority gate.

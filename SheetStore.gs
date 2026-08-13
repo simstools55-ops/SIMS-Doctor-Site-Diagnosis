@@ -34,13 +34,15 @@ function sdsdWriteCandidates_(rows) {
   sh.clearContents();
   const headers = [
     'Rank','Normalized URL','TVS','Demand','Opportunity','Urgency','Asset Value',
-    'Ownership','Recent Treatment Guard','Priority Candidate','Reason'
+    'Ownership','Recent Treatment Guard','Weekly Trend','Evidence Confidence',
+    'Treatment Risk','External Factor','Priority Candidate','Reason'
   ];
   sh.getRange(1,1,1,headers.length).setValues([headers]);
   if (rows.length) {
     const values = rows.map((r,i) => [
       i+1,r.url,r.tvs,r.demand,r.opportunity,r.urgency,r.asset,
-      r.ownership,r.guard,r.priority,r.reason
+      r.ownership,r.guard,r.weeklyTrend,r.evidenceConfidence,
+      r.treatmentRisk,r.externalFactor,r.priority,r.reason
     ]);
     sh.getRange(2,1,values.length,headers.length).setValues(values);
   }
