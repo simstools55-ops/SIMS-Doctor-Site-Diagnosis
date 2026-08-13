@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0-RC3
+
+- Recent Treatment GuardがSBM現行「改善履歴」の `改善実施日` を認識できず、直近処置済み記事をPASSしていた不具合を修正。
+- 状態系ヘッダーの後方互換を維持しつつ、`判定` も参照候補へ追加。
+- `_SDSD_SBM_HISTORY` の最新履歴をURL単位で照合し、直近35日以内の改善を `WAIT` にする既存仕様を復旧。
+- Final Guardも同じ共通Guard関数を使用するため、Treatment Batch生成後の再確認にも修正が反映される。
+
 ## 0.4.0-RC2
 
 - Doctor Case PackageのCase Identity欠落を修正。

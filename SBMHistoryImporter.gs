@@ -6,8 +6,10 @@ function sdsdBuildHistoryMap_() {
     const url = sdsdNormalizeUrl_(rawUrl);
     if (!url) return;
 
-    const status = String(r['状態'] || r['作業状態'] || r['現在状態'] || '');
-    const dateText = r['改善日'] || r['処置日'] || r['日付'] || '';
+    // SBM「改善履歴」シートの現行ヘッダーを最優先で読む。
+    // 旧名称も後方互換として残す。
+    const status = String(r['状態'] || r['作業状態'] || r['現在状態'] || r['判定'] || '');
+    const dateText = r['改善実施日'] || r['改善日'] || r['処置日'] || r['日付'] || '';
     const route = String(r['改善経路'] || r['経路'] || '');
 
     const d = dateText ? new Date(dateText) : null;
