@@ -5,12 +5,13 @@ function sdsdEnsureSheets_() {
     SDSD_CONFIG.sheets.evidencePageWeekly,
     SDSD_CONFIG.sheets.evidencePageQuery,
     SDSD_CONFIG.sheets.sbmHistory,
-    SDSD_CONFIG.sheets.candidates
+    SDSD_CONFIG.sheets.candidates,
+    SDSD_CONFIG.sheets.selectedCases
   ];
   names.forEach(name => {
     let sh = ss.getSheetByName(name);
     if (!sh) sh = ss.insertSheet(name);
-    if (name !== SDSD_CONFIG.sheets.candidates) {
+    if (name !== SDSD_CONFIG.sheets.candidates && name !== SDSD_CONFIG.sheets.selectedCases) {
       try { sh.hideSheet(); } catch (e) {}
     }
   });

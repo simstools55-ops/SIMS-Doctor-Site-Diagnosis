@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0-Sprint3
+- Added site-size treatment capacity policy.
+- Added automatic A1/A2 treatment batch selection.
+- Selection uses standardMax as an upper bound, never as a quota.
+- B/REVIEW/WAIT/SBM/PROTECTED cases are not used to fill the batch.
+- Added Selected Treatment Cases sheet.
+- Added draft Individual Doctor referral JSON per selected case.
+- Added Final Guard recheck against latest SBM treatment history.
+- Article body/ArticleID enrichment is intentionally deferred to the next SBM integration step.
+
 ## 0.2.2-Sprint2-Weekly-Aggregation-Hotfix
 - Fixed weekly trend analysis to aggregate duplicate/raw URL variants by normalized URL and week.
 - Weekly clicks/impressions are summed.

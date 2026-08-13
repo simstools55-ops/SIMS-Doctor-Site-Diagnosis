@@ -8,6 +8,10 @@ function onOpen() {
     .addItem('5. Open Candidates', 'sdsdOpenCandidates')
     .addItem('6. Validate Weekly Trends', 'sdsdValidateWeeklyTrends')
     .addItem('7. Validate Final Priorities', 'sdsdValidateFinalPriorities')
+    .addSeparator()
+    .addItem('8. Build Treatment Batch', 'sdsdBuildTreatmentBatch')
+    .addItem('9. Run Final Guard', 'sdsdRunFinalGuard')
+    .addItem('10. Open Selected Cases', 'sdsdOpenSelectedCases')
     .addToUi();
 }
 
