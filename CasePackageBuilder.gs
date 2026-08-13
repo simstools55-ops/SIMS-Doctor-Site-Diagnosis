@@ -1,3 +1,9 @@
+function sdsdArticleCacheKey_(articleId, url) {
+  const raw = String(articleId || '') + '|' + String(url || '');
+  const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, raw);
+  return 'SDSD_ARTICLE_' + digest.map(b => ('0' + ((b + 256) % 256).toString(16)).slice(-2)).join('');
+}
+
 function sdsdEnrichSelectedCases() {
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName(SDSD_CONFIG.sheets.selectedCases);
@@ -15,7 +21,10 @@ function sdsdEnrichSelectedCases() {
     throw new Error('記事管理データがありません。_SDSD_ARTICLE_MASTERへSBM「記事管理」CSVを入れてください。');
   }
 
-  const extraHeaders = ['ArticleID','Article Title','Main Query','Article Fetch Status','Case Package Status'];
+  const extraHeaders = [
+    'ArticleID','Article Title','Main Query','Article Fetch Status',
+    'Case Package Status','Article Cache Key'
+  ];
   let lastCol = headers.length;
   extraHeaders.forEach(h => {
     if (idx[h] == null) {
@@ -26,6 +35,7 @@ function sdsdEnrichSelectedCases() {
     }
   });
 
+  const cache = CacheService.getDocumentCache();
   let ready = 0;
   let failed = 0;
 
@@ -37,7 +47,6 @@ function sdsdEnrichSelectedCases() {
     const articleId = master ? master.articleId : '';
     const title = master ? master.title : '';
     const mainQuery = master ? master.mainQuery : '';
-
     const fetched = sdsdFetchArticleEvidence_(url);
 
     sh.getRange(r+1, idx['ArticleID']+1).setValue(articleId);
@@ -52,6 +61,16 @@ function sdsdEnrichSelectedCases() {
       continue;
     }
 
+    const cacheKey = sdsdArticleCacheKey_(articleId, url);
+    // Cache value limit is ~100 KB. If too large, export step will refetch it.
+    let cached = false;
+    try {
+      if (fetched.articleHtml.length < 90000) {
+        cache.put(cacheKey, fetched.articleHtml, 21600);
+        cached = true;
+      }
+    } catch(e) {}
+
     const oldReferral = String(values[r][idx['Referral JSON']] || '{}');
     let referral = {};
     try { referral = JSON.parse(oldReferral); } catch(e) {}
@@ -62,6 +81,7 @@ function sdsdEnrichSelectedCases() {
     referral.case_identity.article_id = articleId;
     referral.case_identity.url = url;
 
+    // IMPORTANT: article_html is deliberately NOT stored in the sheet.
     referral.article_evidence = {
       status: 'VALID',
       title: title || fetched.title,
@@ -69,7 +89,7 @@ function sdsdEnrichSelectedCases() {
       meta_description: fetched.metaDescription,
       canonical_url: fetched.canonicalUrl || url,
       main_query: mainQuery,
-      article_html: fetched.articleHtml,
+      body_storage: cached ? 'DOCUMENT_CACHE' : 'REFETCH_ON_EXPORT',
       fetched_at: new Date().toISOString()
     };
 
@@ -80,7 +100,6 @@ function sdsdEnrichSelectedCases() {
       'カニバリ・内部リンク・外部環境要因を確認する',
       '処方前にRecent Treatment Guardを再確認する'
     ];
-
     referral.treatment_constraints = [
       '全面リライトを前提としない',
       '原因確定前にURL変更・大規模構成変更を決定しない',
@@ -88,6 +107,7 @@ function sdsdEnrichSelectedCases() {
     ];
 
     sh.getRange(r+1, idx['Referral JSON']+1).setValue(JSON.stringify(referral));
+    sh.getRange(r+1, idx['Article Cache Key']+1).setValue(cacheKey);
     sh.getRange(r+1, idx['Referral Status']+1).setValue('READY_FOR_INDIVIDUAL_DOCTOR');
     sh.getRange(r+1, idx['Case Package Status']+1).setValue('READY');
     ready++;
@@ -95,7 +115,7 @@ function sdsdEnrichSelectedCases() {
 
   SpreadsheetApp.getUi().alert(
     `Case Enrichment完了\nReady: ${ready}件\n要確認: ${failed}件\n\n` +
-    `すべてReadyなら次に Case Package ZIP を生成してください。`
+    `記事本文はセルへ保存せず、ZIP生成時に安全に添付します。`
   );
 }
 
@@ -115,27 +135,63 @@ function sdsdExportDoctorCasePackageZip() {
     throw new Error(`READYではない案件が${notReady.length}件あります。先に Case Enrichment を完了してください。`);
   }
 
+  const cache = CacheService.getDocumentCache();
   const blobs = [];
   const manifestCases = [];
+  let refetched = 0;
 
   rows.forEach((r,i) => {
     const articleId = String(r[idx['ArticleID']] || `CASE-${i+1}`);
+    const url = String(r[idx['URL']] || '');
     const jsonText = String(r[idx['Referral JSON']] || '{}');
     const safeId = articleId.replace(/[^A-Za-z0-9._-]/g,'_');
-    blobs.push(Utilities.newBlob(jsonText, 'application/json', `cases/${String(i+1).padStart(2,'0')}-${safeId}/case.json`));
+    const folder = `cases/${String(i+1).padStart(2,'0')}-${safeId}`;
 
     let parsed = {};
     try { parsed = JSON.parse(jsonText); } catch(e) {}
-    const html = parsed.article_evidence && parsed.article_evidence.article_html
-      ? parsed.article_evidence.article_html : '';
-    blobs.push(Utilities.newBlob(html, 'text/html', `cases/${String(i+1).padStart(2,'0')}-${safeId}/article.html`));
+
+    let html = '';
+    const cacheKey = idx['Article Cache Key'] != null
+      ? String(r[idx['Article Cache Key']] || '') : '';
+
+    if (cacheKey) {
+      try { html = cache.get(cacheKey) || ''; } catch(e) {}
+    }
+
+    if (!html) {
+      const fetched = sdsdFetchArticleEvidence_(url);
+      if (fetched.status !== 'VALID') {
+        throw new Error(`記事本文の再取得に失敗しました: ${articleId} / ${url} / ${fetched.status}`);
+      }
+      html = fetched.articleHtml;
+      refetched++;
+    }
+
+    // ZIP case.json stays lightweight; article body is a separate file.
+    if (parsed.article_evidence) {
+      parsed.article_evidence.body_storage = 'PACKAGE_FILE';
+      parsed.article_evidence.body_file = 'article.html';
+    }
+
+    blobs.push(Utilities.newBlob(
+      JSON.stringify(parsed,null,2),
+      'application/json',
+      `${folder}/case.json`
+    ));
+    blobs.push(Utilities.newBlob(
+      html,
+      'text/html',
+      `${folder}/article.html`
+    ));
 
     manifestCases.push({
       order: i+1,
       article_id: articleId,
-      url: String(r[idx['URL']] || ''),
+      url: url,
       priority: String(r[idx['Site Priority']] || ''),
-      tvs: Number(r[idx['TVS']] || 0)
+      tvs: Number(r[idx['TVS']] || 0),
+      case_file: `${folder}/case.json`,
+      article_file: `${folder}/article.html`
     });
   });
 
@@ -143,16 +199,29 @@ function sdsdExportDoctorCasePackageZip() {
     format: 'SIMS_DOCTOR_SITE_TREATMENT_BATCH_V1',
     contract_version: '1.0',
     generated_at: new Date().toISOString(),
-    site_article_count: rows.length,
+    case_count: rows.length,
     cases: manifestCases
   };
-  blobs.push(Utilities.newBlob(JSON.stringify(manifest,null,2),'application/json','manifest.json'));
+  blobs.push(Utilities.newBlob(
+    JSON.stringify(manifest,null,2),
+    'application/json',
+    'manifest.json'
+  ));
 
-  const zipName = `SIMS-Doctor-Site-Treatment-Batch-${Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyyMMdd-HHmmss')}.zip`;
-  const zipBlob = Utilities.zip(blobs, zipName);
-  const file = DriveApp.createFile(zipBlob);
+  const zipName =
+    `SIMS-Doctor-Site-Treatment-Batch-${Utilities.formatDate(
+      new Date(),
+      Session.getScriptTimeZone() || 'Asia/Tokyo',
+      'yyyyMMdd-HHmmss'
+    )}.zip`;
+
+  const file = DriveApp.createFile(Utilities.zip(blobs, zipName));
 
   SpreadsheetApp.getUi().alert(
-    `Doctor Case Package ZIP生成完了\n\n案件数: ${rows.length}\n保存先:\n${file.getUrl()}`
+    `Doctor Case Package ZIP生成完了\n\n` +
+    `案件数: ${rows.length}\n` +
+    `本文再取得: ${refetched}件\n` +
+    `Last error: (なし)\n\n` +
+    `保存先:\n${file.getUrl()}`
   );
 }
