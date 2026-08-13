@@ -7,6 +7,7 @@ function onOpen() {
     .addItem('4. Run Site Analysis', 'sdsdRunAnalysis')
     .addItem('5. Open Candidates', 'sdsdOpenCandidates')
     .addItem('6. Validate Weekly Trends', 'sdsdValidateWeeklyTrends')
+    .addItem('7. Validate Final Priorities', 'sdsdValidateFinalPriorities')
     .addToUi();
 }
 

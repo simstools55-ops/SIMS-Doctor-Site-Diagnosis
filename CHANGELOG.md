@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2-Sprint2-Weekly-Aggregation-Hotfix
+- Fixed weekly trend analysis to aggregate duplicate/raw URL variants by normalized URL and week.
+- Weekly clicks/impressions are summed.
+- Weekly average position is recalculated using impression-weighted average.
+- Week keys are normalized before grouping.
+- No TVS, Ownership, Recent Treatment Guard, Risk, or Priority rules changed.
+
 ## 0.2.0-Sprint2
 - Added weekly trend classification.
 - Added Evidence Confidence.
