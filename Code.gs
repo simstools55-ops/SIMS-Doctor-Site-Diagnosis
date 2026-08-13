@@ -6,6 +6,7 @@ function onOpen() {
     .addItem('3. Import SBM History CSV', 'sdsdImportHistoryHelp')
     .addItem('4. Run Site Analysis', 'sdsdRunAnalysis')
     .addItem('5. Open Candidates', 'sdsdOpenCandidates')
+    .addItem('6. Validate Weekly Trends', 'sdsdValidateWeeklyTrends')
     .addToUi();
 }
 
