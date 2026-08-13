@@ -16,7 +16,8 @@ function sdsdValidateFinalPriorities() {
   const groups = {};
   rows.forEach(r => {
     const p = String(r[priorityCol] || 'EMPTY');
-    (groups[p] ||= []).push(r);
+    if (!groups[p]) groups[p] = [];
+    groups[p].push(r);
   });
 
   const order = ['A1_CANDIDATE','A2_CANDIDATE','B_CANDIDATE','DOCTOR_REVIEW',
