@@ -273,6 +273,54 @@ function sdsdCanMergeDiagnosisCases_(cluster, item, articleMap) {
   return (themeSim >= 0.7 && sameLead) || themeSim >= 0.9;
 }
 
+
+function sdsdUserDiagnosisThemeLabel_(cluster) {
+  const type = String(cluster.type || '');
+  const q = String(cluster.parentTheme || cluster.theme || '').trim();
+  const targets = cluster.targets || [];
+
+  // Keep familiar product/service names concise.
+  if (/nhk\s*プラス/i.test(q) || /nhk\s*プラス/i.test(String(cluster.diagnosisThemeKey || ''))) {
+    return type === 'カニバリ疑い' ? 'NHKプラスのエラー・視聴トラブル記事群' : 'NHKプラスの検索ニーズ';
+  }
+  if (/獅子舞/.test(q)) return '獅子舞のご祝儀・相場';
+  if (/line.*電話|line電話/i.test(q)) return 'LINE電話の充電切れ時の挙動';
+  if (/まぜてる|ませてる/.test(q)) return '「ませてる」の意味・使い方';
+  if (/自転車.*塗装|塗装.*自転車/.test(q)) return '自転車塗装の料金・相場';
+  if (/vrchat/i.test(q)) return 'VRChatのPS5対応・遊び方';
+  if (/u-?next/i.test(q)) return 'U-NEXTのミラーリング・テレビ視聴';
+  if (/元ヤン/.test(q)) return '元ヤンの特徴・見分け方';
+
+  // Generic cleanup: remove noisy modifiers and keep a readable topic.
+  let label = q
+    .replace(/[【\[].*?[】\]]/g, ' ')
+    .replace(/\b20\d{2}年?(最新版|最新)?\b/g, ' ')
+    .replace(/完全(対処|解決)?ガイド|完全版|徹底解説|完全解説/g, ' ')
+    .replace(/原因と(直し方|対処法)|原因別(解決|対処)ガイド/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (label.length > 34) label = label.slice(0, 34) + '…';
+  return label || sdsdBuildDiagnosisThemeLabel_(cluster);
+}
+
+function sdsdSiteImpactText_(cluster) {
+  const type = String(cluster.type || '');
+  const n = (cluster.targets || []).length;
+  const qn = (cluster.queries || []).length;
+
+  if (type === 'カニバリ疑い') {
+    return `検索意図が重なる${n}記事の役割を整理し、評価の分散や順位競合を減らせる可能性があります。Doctorが統合・役割分担・維持を判断します。`;
+  }
+  if (type === '新規記事機会') {
+    return `既存記事で十分に受け止められていない検索需要を補い、サイトの検索入口を増やせる可能性があります。Doctor確認後にCreator候補とします。`;
+  }
+  if (type === 'コンテンツギャップ') {
+    return `既存記事に関連する未充足ニーズを補い、${qn}件の関連検索に対する網羅性と内部導線を強化できる可能性があります。`;
+  }
+  return 'サイト全体への影響をDoctorで確認します。';
+}
+
 function sdsdBuildDiagnosisThemeLabel_(cluster) {
   const raw = String(cluster.diagnosisThemeKey || '');
   const label = raw.split('|').slice(1).join('|').trim();
@@ -460,7 +508,8 @@ function sdsdClusterSiteOpportunities_(raw) {
   });
 
   stage2.forEach(c => {
-    c.diagnosisTheme = sdsdBuildDiagnosisThemeLabel_(c);
+    c.diagnosisTheme = sdsdUserDiagnosisThemeLabel_(c);
+    c.siteImpact = sdsdSiteImpactText_(c);
 
     const preview = c.queries.slice(0,5).join(' / ');
     const more = c.queries.length > 5
@@ -509,7 +558,7 @@ function sdsdWriteSiteOpportunities_(rows) {
 
   const titleMap = sdsdArticleTitleMap_();
   const headers = [
-    '優先順位','改善テーマ','診断テーマ','親テーマ','検索テーマ','関連クエリ数',
+    '優先順位','改善テーマ','診断テーマ','サイト全体への期待効果','親テーマ','検索テーマ','関連クエリ数',
     '対象記事','根拠','確信度','推奨対応','担当'
   ];
 
@@ -517,6 +566,7 @@ function sdsdWriteSiteOpportunities_(rows) {
     i+1,
     x.type,
     x.diagnosisTheme || x.parentTheme || x.theme,
+    x.siteImpact || 'サイト全体への影響をDoctorで確認します。',
     x.parentTheme || x.theme,
     x.theme,
     x.queries.length,
@@ -541,7 +591,7 @@ function sdsdWriteSiteOpportunities_(rows) {
     1,1,Math.max(1,values.length+1),headers.length
   ).setWrap(true);
 
-  [70,150,220,220,240,100,430,520,90,360,120]
+  [70,150,260,420,200,220,100,430,520,90,360,120]
     .forEach((w,i) => sh.setColumnWidth(i+1,w));
 
   if (!values.length) {
@@ -584,7 +634,7 @@ function sdsdRunSiteOpportunityDiagnosis() {
       `（元候補 ${rawCounts['新規記事機会']||0}件）\n` +
       `コンテンツギャップ: ${counts['コンテンツギャップ']||0}テーマ` +
       `（元候補 ${rawCounts['コンテンツギャップ']||0}件）\n\n` +
-      `検索意図 → 親テーマ → 診断テーマの3段階で、Doctorが一度に判断すべき案件へまとめています。\n` +
+      `検索意図 → 親テーマ → 診断テーマの3段階で整理し、サイト全体への期待効果も表示しています。\n` +
       `これは一次候補であり、自動処置は行いません。`
     );
   } catch(e) {
