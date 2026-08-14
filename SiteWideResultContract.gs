@@ -22,6 +22,176 @@ function sdsdExtractJsonObject_(text) {
   throw new Error('Doctor結果からJSONを抽出できませんでした。');
 }
 
+
+function sdsdSiteWideSourceCaseMap_() {
+  const map = {};
+  try {
+    sdsdSiteWidePackageRows_().forEach(x => {
+      map[String(x.case_id || '')] = x;
+    });
+  } catch(e) {}
+  return map;
+}
+
+function sdsdCanonicalArticleListFromSource_(source) {
+  if (!source) return [];
+  if (Array.isArray(source.target_articles)) return source.target_articles;
+  return [];
+}
+
+function sdsdDoctorTriageCaseFromSource_(caseId, overrides, sourceMap) {
+  overrides = overrides || {};
+  const source = sourceMap[String(caseId || '')] || null;
+
+  return {
+    diagnosis_case_id: String(
+      overrides.diagnosis_case_id ||
+      overrides.case_id ||
+      caseId ||
+      ''
+    ),
+    diagnosis_theme: String(
+      overrides.diagnosis_theme ||
+      overrides.theme ||
+      (source ? source.diagnosis_theme : '') ||
+      ''
+    ),
+    diagnosis_type: String(
+      overrides.diagnosis_type ||
+      overrides.improvement_type ||
+      (source ? source.improvement_type : '') ||
+      ''
+    ),
+    absorbed_source_case_ids: Array.isArray(overrides.absorbed_source_case_ids)
+      ? overrides.absorbed_source_case_ids.map(String) : [],
+    target_articles: Array.isArray(overrides.target_articles)
+      ? overrides.target_articles
+      : sdsdCanonicalArticleListFromSource_(source),
+    doctor_decision: String(
+      overrides.doctor_decision ||
+      overrides.decision ||
+      overrides.routing ||
+      ''
+    ),
+    confidence: String(
+      overrides.confidence ||
+      (source ? source.confidence : '') ||
+      ''
+    ),
+    site_impact: String(
+      overrides.site_impact ||
+      (source ? source.expected_site_impact : '') ||
+      ''
+    ),
+    treatment_strategy: String(
+      overrides.treatment_strategy ||
+      ''
+    ),
+    route_to: String(overrides.route_to || ''),
+    eventual_route: String(overrides.eventual_route || ''),
+    reason: String(
+      overrides.reason ||
+      overrides.rationale ||
+      ''
+    ),
+    additional_evidence_needed: Array.isArray(overrides.additional_evidence_needed)
+      ? overrides.additional_evidence_needed.map(String) : []
+  };
+}
+
+function sdsdConvertDoctorTriageResult_(obj) {
+  const sourceMap = sdsdSiteWideSourceCaseMap_();
+  const out = [];
+  const absorbed = {};
+
+  // 1) Precision-diagnosis priority queue.
+  (obj.priority_queue_for_precision_diagnosis || []).forEach(x => {
+    const c = sdsdDoctorTriageCaseFromSource_(x.case_id, x, sourceMap);
+    c.route_to = 'NEEDS_EVIDENCE';
+    c.eventual_route = (x.next_route_candidates || []).join(' / ');
+    c.doctor_decision = String(x.routing || 'ADDITIONAL_EVIDENCE_REQUIRED');
+    out.push(c);
+
+    (x.absorbed_source_case_ids || []).forEach(id => {
+      absorbed[String(id)] = true;
+    });
+  });
+
+  // 2) Content gaps merged with duplicate "new article" signals.
+  (obj.content_gap_merged_into_existing_theme || []).forEach(x => {
+    const c = sdsdDoctorTriageCaseFromSource_(x.case_id, x, sourceMap);
+    c.route_to = 'NEEDS_EVIDENCE';
+    c.eventual_route = 'WRITER';
+    c.doctor_decision = String(
+      x.routing || 'SBM_ROUTINE_QUEUE_PENDING_BODY_CHECK'
+    );
+    c.treatment_strategy = 'LIGHT_FIX_CANDIDATE';
+    if (!c.reason) {
+      c.reason = '既存記事で対応可能な可能性が高い。本文確認後にWriter軽微修正候補。';
+    }
+    out.push(c);
+
+    (x.absorbed_source_case_ids || []).forEach(id => {
+      absorbed[String(id)] = true;
+    });
+  });
+
+  // 3) Standalone high-confidence routine queue.
+  (obj.sbm_routine_queue_high_confidence_standalone || []).forEach(id => {
+    if (absorbed[String(id)]) return;
+    const c = sdsdDoctorTriageCaseFromSource_(id, {}, sourceMap);
+    c.route_to = 'NEEDS_EVIDENCE';
+    c.eventual_route = 'WRITER';
+    c.doctor_decision = 'SBM_ROUTINE_QUEUE_PENDING_BODY_CHECK';
+    c.treatment_strategy = 'LIGHT_FIX_CANDIDATE';
+    c.reason = '高confidenceの単独コンテンツギャップ。本文確認後にWriter軽微修正候補。';
+    out.push(c);
+  });
+
+  // 4) Medium-confidence / single-query findings -> monitor.
+  (obj.low_priority_monitor_medium_confidence_single_query || []).forEach(id => {
+    if (absorbed[String(id)]) return;
+    const c = sdsdDoctorTriageCaseFromSource_(id, {}, sourceMap);
+    c.route_to = 'MONITOR';
+    c.doctor_decision = 'MONITOR_LOW_SIGNAL';
+    c.reason = '中confidence・単一クエリの弱いシグナル。次回サイト診断まで経過観察。';
+    out.push(c);
+  });
+
+  // 5) Creator candidates still require cannibalization/body check.
+  (obj.creator_candidates_pending_cannibalization_check || []).forEach(id => {
+    if (absorbed[String(id)]) return;
+    const c = sdsdDoctorTriageCaseFromSource_(id, {}, sourceMap);
+    c.route_to = 'NEEDS_EVIDENCE';
+    c.eventual_route = 'CREATOR';
+    c.doctor_decision = 'CREATOR_PENDING_CANNIBALIZATION_CHECK';
+    c.reason = '新規記事化前に既存記事との重複・カニバリ確認が必要。';
+    out.push(c);
+  });
+
+  // Deduplicate by diagnosis_case_id, keeping the first (higher-priority section).
+  const seen = {};
+  return out.filter(c => {
+    const id = String(c.diagnosis_case_id || '');
+    if (!id || seen[id]) return false;
+    seen[id] = true;
+    return true;
+  });
+}
+
+function sdsdIsDoctorTriageShape_(obj) {
+  return !!(
+    obj &&
+    (
+      Array.isArray(obj.priority_queue_for_precision_diagnosis) ||
+      Array.isArray(obj.content_gap_merged_into_existing_theme) ||
+      Array.isArray(obj.sbm_routine_queue_high_confidence_standalone) ||
+      Array.isArray(obj.low_priority_monitor_medium_confidence_single_query) ||
+      Array.isArray(obj.creator_candidates_pending_cannibalization_check)
+    )
+  );
+}
+
 function sdsdValidateSiteWideResult_(obj) {
   if (!obj || obj.format !== 'SIMS_DOCTOR_SITE_WIDE_RESULT_V1') {
     throw new Error(
@@ -29,50 +199,85 @@ function sdsdValidateSiteWideResult_(obj) {
     );
   }
 
-  if (!Array.isArray(obj.diagnosis_cases)) {
-    throw new Error('diagnosis_cases がありません。');
+  if (!Array.isArray(obj.diagnosis_cases) && !sdsdIsDoctorTriageShape_(obj)) {
+    throw new Error(
+      'diagnosis_cases またはDoctor一次トリアージ形式の診断結果がありません。'
+    );
   }
 
-  const allowed = {
-    WRITER:true,
-    MERGE:true,
-    CREATOR:true,
-    MONITOR:true,
-    NO_ACTION:true,
-    NEEDS_EVIDENCE:true
-  };
+  if (Array.isArray(obj.diagnosis_cases)) {
+    const allowed = {
+      WRITER:true,
+      MERGE:true,
+      CREATOR:true,
+      MONITOR:true,
+      NO_ACTION:true,
+      NEEDS_EVIDENCE:true
+    };
 
-  obj.diagnosis_cases.forEach((c,i) => {
-    if (!c.diagnosis_case_id) {
-      throw new Error(`diagnosis_cases[${i}] に diagnosis_case_id がありません。`);
-    }
-    if (!Array.isArray(c.absorbed_source_case_ids)) {
-      throw new Error(`diagnosis_cases[${i}] に absorbed_source_case_ids がありません。`);
-    }
-    if (!allowed[String(c.route_to || '')]) {
-      throw new Error(
-        `diagnosis_cases[${i}] の route_to が不正です: ${c.route_to}`
-      );
-    }
-  });
+    obj.diagnosis_cases.forEach((c,i) => {
+      if (!c.diagnosis_case_id) {
+        throw new Error(`diagnosis_cases[${i}] に diagnosis_case_id がありません。`);
+      }
+      if (!Array.isArray(c.absorbed_source_case_ids)) {
+        throw new Error(`diagnosis_cases[${i}] に absorbed_source_case_ids がありません。`);
+      }
+      if (!allowed[String(c.route_to || '')]) {
+        throw new Error(
+          `diagnosis_cases[${i}] の route_to が不正です: ${c.route_to}`
+        );
+      }
+    });
+  }
 
   return true;
 }
 
 function sdsdNormalizeDoctorSiteWideResult_(obj) {
-  const site = obj.site || {};
+  const siteInput = obj.site || {};
+  const fallbackSite = sdsdSiteMetaFromArticleMaster_();
+
+  const rawCases = Array.isArray(obj.diagnosis_cases)
+    ? obj.diagnosis_cases
+    : sdsdConvertDoctorTriageResult_(obj);
+
+  const overall =
+    obj.overall_diagnosis ||
+    (obj.site_wide_diagnosis
+      ? obj.site_wide_diagnosis.overall_assessment
+      : '') ||
+    (obj.presentation ? obj.presentation.summary : '') ||
+    '';
+
   return {
     format: obj.format,
     contract_version: String(obj.contract_version || '1.0'),
     generated_at: String(obj.generated_at || new Date().toISOString()),
     site: {
-      site_id: String(site.site_id || ''),
-      site_name: String(site.site_name || ''),
-      site_url: String(site.site_url || '')
+      site_id: String(
+        siteInput.site_id ||
+        obj.site_id ||
+        fallbackSite.site_id ||
+        ''
+      ),
+      site_name: String(
+        siteInput.site_name ||
+        obj.site_name ||
+        fallbackSite.site_name ||
+        ''
+      ),
+      site_url: String(
+        siteInput.site_url ||
+        obj.site_url ||
+        fallbackSite.site_url ||
+        ''
+      )
     },
-    site_diagnosis_batch_id: String(obj.site_diagnosis_batch_id || ''),
-    overall_diagnosis: String(obj.overall_diagnosis || ''),
-    diagnosis_cases: obj.diagnosis_cases.map(c => ({
+    site_diagnosis_batch_id: String(
+      obj.site_diagnosis_batch_id || ''
+    ),
+    overall_diagnosis: String(overall),
+    diagnosis_cases: rawCases.map(c => ({
       diagnosis_case_id: String(c.diagnosis_case_id || ''),
       diagnosis_theme: String(c.diagnosis_theme || ''),
       diagnosis_type: String(c.diagnosis_type || ''),
@@ -174,7 +379,7 @@ function sdsdRegisterSiteWideDoctorResult() {
   const ui = SpreadsheetApp.getUi();
   const prompt = ui.prompt(
     'Doctor横断診断結果を登録',
-    'Doctor回答の SIMS_DOCTOR_SITE_WIDE_RESULT_V1 JSON を貼り付けてください。',
+    'Doctor回答全文、または SIMS_DOCTOR_SITE_WIDE_RESULT_V1 JSON を貼り付けてください。',
     ui.ButtonSet.OK_CANCEL
   );
   if (prompt.getSelectedButton() !== ui.Button.OK) return;
