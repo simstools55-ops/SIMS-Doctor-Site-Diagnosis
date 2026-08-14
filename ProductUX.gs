@@ -6,7 +6,11 @@ const SDSD_INTERNAL_SHEET_NAMES_ = Object.freeze([
   '_SDSD_ARTICLE_MASTER',
   'Weekly Trend Validation',
   'Priority Validation',
-  'Query Evidence Diagnostics'
+  'Query Evidence Diagnostics',
+  'Site Diagnosis Candidates',
+  'Selected Treatment Cases',
+  'シート1',
+  'Sheet1'
 ]);
 
 
@@ -20,8 +24,21 @@ function sdsdProductEnsureSheets_() {
   legacyPairs.forEach(pair => {
     const legacy = ss.getSheetByName(pair[0]);
     const current = ss.getSheetByName(pair[1]);
+
     if (legacy && !current) {
-      try { legacy.setName(pair[1]); } catch (e) {}
+      try {
+        legacy.setName(pair[1]);
+      } catch (e) {}
+      return;
+    }
+
+    if (legacy && current) {
+      try {
+        if (ss.getActiveSheet().getSheetId() === legacy.getSheetId()) {
+          ss.setActiveSheet(current);
+        }
+        legacy.hideSheet();
+      } catch (e) {}
     }
   });
 
@@ -46,20 +63,27 @@ function sdsdProductEnsureSheets_() {
 
 function sdsdHideUnusedDefaultSheet_() {
   const ss = SpreadsheetApp.getActive();
+
   ['シート1', 'Sheet1'].forEach(name => {
     const sh = ss.getSheetByName(name);
     if (!sh) return;
+
     const values = sh.getDataRange().getDisplayValues();
     const hasContent = values.some(row => row.some(v => String(v).trim() !== ''));
-    if (!hasContent) {
-      try {
-        const candidates = ss.getSheetByName(SDSD_CONFIG.sheets.candidates);
-        if (candidates && ss.getActiveSheet().getSheetId() === sh.getSheetId()) {
-          ss.setActiveSheet(candidates);
-        }
-        sh.hideSheet();
-      } catch (e) {}
-    }
+    if (hasContent) return;
+
+    try {
+      const preferred =
+        ss.getSheetByName(SDSD_CONFIG.sheets.candidates) ||
+        ss.getSheetByName(SDSD_CONFIG.sheets.selectedCases);
+
+      if (preferred && ss.getActiveSheet().getSheetId() === sh.getSheetId()) {
+        ss.setActiveSheet(preferred);
+        SpreadsheetApp.flush();
+      }
+
+      sh.hideSheet();
+    } catch (e) {}
   });
 }
 
@@ -112,6 +136,7 @@ function sdsdShowInternalSheets() {
   const ss = SpreadsheetApp.getActive();
   let count = 0;
   SDSD_INTERNAL_SHEET_NAMES_.forEach(name => {
+    if (name === 'シート1' || name === 'Sheet1') return;
     const sh = ss.getSheetByName(name);
     if (!sh) return;
     try {
