@@ -158,6 +158,12 @@ function sdsdReasonJa_(reason) {
     ['PLATFORM_OR_OS_CHANGE', 'プラットフォーム・OS変更の影響可能性'],
     ['高Risk', '変更リスクが高い'],
     ['追加Evidence確認', '追加データの確認が必要'],
+    ['TRAFFIC_DECLINE', '検索流入が低下'],
+    ['RANKING_DECLINE', '検索順位が低下'],
+    ['SEVERE_DECLINE', '直近で大きく悪化'],
+    ['VOLATILE', '直近の推移が不安定'],
+    ['GROWTH', '回復・成長傾向'],
+    ['STABLE', '直近の推移は安定'],
     ['主病変がCTR/即効性改善', 'CTR（クリック率）の改善余地が大きい'],
     ['DOCTOR_OWNED', 'Doctor精密診断向き'],
     ['SBM_OWNED', 'SBMの日常改善向き']
@@ -205,25 +211,50 @@ function sdsdWriteSiteSummary_(rows, result) {
   const growth = rows.filter(r => r.weeklyTrend === 'GROWTH').length;
   const external = rows.filter(r => String(r.externalFactor || '') !== '').length;
 
+  let selectedCount = 0;
+  try {
+    const selected = ss.getSheetByName(SDSD_CONFIG.sheets.selectedCases);
+    if (selected && selected.getLastRow() >= 2) {
+      const vals = selected.getDataRange().getValues();
+      const hdr = vals[0].map(String);
+      const urlCol = hdr.indexOf('URL') >= 0 ? hdr.indexOf('URL') :
+                     hdr.indexOf('記事URL');
+      if (urlCol >= 0) {
+        selectedCount = vals.slice(1).filter(r => String(r[urlCol] || '').trim()).length;
+      }
+    }
+  } catch (e) {}
+
+  let overall = 'サイト全体を一律に修正する状態ではありません。';
+  if ((a1 + a2) > 0) {
+    overall += ` 影響の大きい${a1 + a2}記事を優先してDoctorで原因を確認します。`;
+  }
+  if (growth + protectedCount > 0) {
+    overall += ' 回復・成長中の記事は保護し、不要な修正を避けます。';
+  }
+
   const values = [
     ['サイト診断サマリー', ''],
     ['診断対象', `${total}記事`],
     ['Doctor精密診断の優先候補', `${a1 + a2}記事（最優先 ${a1} / 優先 ${a2}）`],
+    ['今回Doctorへ送る記事', selectedCount ? `${selectedCount}記事` : 'Treatment Batch作成前'],
     ['追加確認が必要', `${review}記事`],
     ['SBMの日常改善向き', `${sbm}記事`],
-    ['回復・成長中のため保護', `${protectedCount}記事`],
+    ['回復・成長中などの保護対象', `${protectedCount}記事`],
     ['最近処置済み・経過観察', `${wait}記事`],
     ['', ''],
+    ['サイト全体の所見', overall],
+    ['', ''],
     ['サイト全体の主な症状', ''],
-    ['大幅な悪化', `${severe}記事`],
+    ['直近で大きく悪化', `${severe}記事`],
     ['検索流入低下', `${traffic}記事`],
     ['検索順位低下', `${ranking}記事`],
     ['推移が不安定', `${volatile}記事`],
     ['回復・成長傾向', `${growth}記事`],
-    ['外部要因の影響可能性', `${external}記事`],
+    ['OS・サービス変更など外部要因の可能性', `${external}記事`],
     ['', ''],
-    ['今回の読み方', 'サイト全体を一律に修正するのではなく、優先候補をDoctorで精密診断し、共通原因と処置の必要性を確認します。'],
-    ['注意', 'この段階では「修正すれば何％改善する」とは断定しません。修正効果はDoctor診断後に判断します。'],
+    ['この診断の読み方', 'サイト全体を一律に修正するのではなく、優先候補をDoctorで精密診断し、共通原因と処置の必要性を確認します。'],
+    ['注意', 'この段階では改善率を断定しません。実際の処置はDoctorの精密診断後に決めます。'],
     ['', ''],
     ['優先度の見方', ''],
     ['最優先', 'Doctorで詳しく診断する優先度が特に高い'],
@@ -233,7 +264,6 @@ function sdsdWriteSiteSummary_(rows, result) {
     ['保護', '回復・成長中などのため今は大きく触らない'],
     ['経過観察', '最近の処置後などのため、しばらく推移を見る'],
     ['', ''],
-    ['今回Doctorへ送る記事', 'Treatment Batch作成前'],
     ['Doctor Case Package', '未生成']
   ];
 
@@ -241,11 +271,12 @@ function sdsdWriteSiteSummary_(rows, result) {
   sh.getRange('A1:B1').merge();
   sh.getRange('A1').setValue('サイト診断サマリー');
   sh.getRange('A1').setFontWeight('bold').setFontSize(14);
-  sh.getRange('A9').setFontWeight('bold');
-  sh.getRange('A20').setFontWeight('bold');
+  sh.getRange('A10').setFontWeight('bold');
+  sh.getRange('A12').setFontWeight('bold');
+  sh.getRange('A23').setFontWeight('bold');
   sh.getRange(1,1,values.length,1).setFontWeight('bold');
-  sh.setColumnWidth(1, 230);
-  sh.setColumnWidth(2, 620);
+  sh.setColumnWidth(1, 250);
+  sh.setColumnWidth(2, 650);
   sh.getRange(1,1,values.length,2).setWrap(true);
   sh.setFrozenRows(1);
 
