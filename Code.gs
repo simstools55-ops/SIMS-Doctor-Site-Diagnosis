@@ -32,6 +32,7 @@ function onOpen() {
     .addItem('12. Doctor横断診断結果を登録', 'sdsdRegisterSiteWideDoctorResult')
     .addItem('13. サイト治療計画を見る', 'sdsdOpenTreatmentPlan')
     .addItem('14. 優先クラスタの精密診断Packageを生成', 'sdsdExportPriorityPrecisionClusterPackage')
+    .addItem('15. 選択中のMerge紹介状を作成', 'sdsdCreateMergeReferralFromSelectedTreatment')
     .addSeparator()
     .addSubMenu(dataMenu)
     .addSubMenu(maintenanceMenu)
