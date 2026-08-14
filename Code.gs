@@ -24,6 +24,8 @@ function onOpen() {
     .addItem('6. 選定案件を見る', 'sdsdOpenSelectedCases')
     .addItem('7. Doctor Case Packageを生成', 'sdsdCreateProductCasePackage')
     .addSeparator()
+    .addItem('8. サイト横断の改善機会を診断', 'sdsdRunSiteOpportunityDiagnosis')
+    .addSeparator()
     .addSubMenu(dataMenu)
     .addSubMenu(maintenanceMenu)
     .addToUi();

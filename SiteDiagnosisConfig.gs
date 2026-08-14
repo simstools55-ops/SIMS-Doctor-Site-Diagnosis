@@ -9,7 +9,8 @@ const SDSD_CONFIG = Object.freeze({
     summary: 'サイト診断サマリー',
     candidates: '診断候補',
     selectedCases: '今回の診断対象',
-    articleMaster: '_SDSD_ARTICLE_MASTER'
+    articleMaster: '_SDSD_ARTICLE_MASTER',
+    opportunities: 'サイト改善プラン'
   },
   score: {
     demandMax: 30,
