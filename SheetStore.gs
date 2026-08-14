@@ -37,7 +37,7 @@ function sdsdWriteCandidates_(rows) {
   sh.clear();
 
   const userHeaders = [
-    '順位','記事URL','診断優先度','選定理由','現在の状態'
+    '優先順位','記事タイトル','記事URL','優先度','選定理由','対応方針'
   ];
   const technicalHeaders = [
     'Rank','Normalized URL','TVS','Demand','Opportunity','Urgency','Asset Value',
@@ -46,46 +46,49 @@ function sdsdWriteCandidates_(rows) {
   ];
   const headers = userHeaders.concat(technicalHeaders);
 
+  const articleMap = sdsdArticleTitleMap_();
+  const displayRows = rows.slice().sort((a,b) => {
+    const pa = sdsdPriorityRank_(a.priority);
+    const pb = sdsdPriorityRank_(b.priority);
+    if (pa !== pb) return pa - pb;
+    return Number(b.tvs || 0) - Number(a.tvs || 0);
+  });
+
   sh.getRange(1,1,1,headers.length).setValues([headers]);
 
-  if (rows.length) {
-    const values = rows.map((r,i) => {
-      const priorityJa = r.priority === 'A1_CANDIDATE' ? '最優先'
-        : r.priority === 'A2_CANDIDATE' ? '優先'
-        : r.priority === 'WAIT' ? '経過観察'
-        : r.priority === 'PROTECTED' ? '保護'
-        : r.priority === 'SBM' ? '日常改善'
-        : r.priority === 'DOCTOR_REVIEW' || r.priority === 'REVIEW' ? '要確認'
-        : String(r.priority || '');
+  if (displayRows.length) {
+    const values = displayRows.map((r,i) => [
+      i+1,
+      sdsdDisplayTitle_(r.url, articleMap),
+      r.url,
+      sdsdPriorityJa_(r.priority),
+      sdsdReasonJa_(r.reason),
+      sdsdActionJa_(r),
 
-      const statusJa = r.guard !== 'PASS' ? '最近処置済み'
-        : r.ownership !== 'DOCTOR_OWNED' ? 'Doctor対象外'
-        : r.priority === 'PROTECTED' ? '回復・成長中'
-        : r.priority === 'WAIT' ? 'モニター中'
-        : r.priority === 'A1_CANDIDATE' || r.priority === 'A2_CANDIDATE' ? '診断候補'
-        : '確認済み';
-
-      return [
-        i+1,
-        r.url,
-        priorityJa,
-        r.reason,
-        statusJa,
-
-        i+1,r.url,r.tvs,r.demand,r.opportunity,r.urgency,r.asset,
-        r.ownership,r.guard,r.weeklyTrend,r.evidenceConfidence,
-        r.treatmentRisk,r.externalFactor,r.priority,r.reason
-      ];
-    });
+      i+1,r.url,r.tvs,r.demand,r.opportunity,r.urgency,r.asset,
+      r.ownership,r.guard,r.weeklyTrend,r.evidenceConfidence,
+      r.treatmentRisk,r.externalFactor,r.priority,r.reason
+    ]);
     sh.getRange(2,1,values.length,headers.length).setValues(values);
   }
 
   sh.setFrozenRows(1);
   sh.getRange(1,1,1,userHeaders.length).setFontWeight('bold');
-  sh.autoResizeColumns(1,userHeaders.length);
+  sh.setColumnWidth(1, 90);
   sh.setColumnWidth(2, 360);
-  sh.setColumnWidth(4, 420);
-  sh.setColumnWidth(5, 150);
+  sh.setColumnWidth(3, 320);
+  sh.setColumnWidth(4, 110);
+  sh.setColumnWidth(5, 460);
+  sh.setColumnWidth(6, 170);
+  sh.getRange(1,1,Math.max(sh.getLastRow(),1),userHeaders.length).setWrap(true);
+  sh.getRange(1,4).setNote(
+    '最優先: Doctor精密診断の優先度が特に高い\n' +
+    '優先: Doctor精密診断を推奨\n' +
+    '要確認: 追加情報を確認して判断\n' +
+    '日常改善: SBMで対応\n' +
+    '保護: 今は大きく触らない\n' +
+    '経過観察: 推移を見る'
+  );
   sdsdHideTechnicalColumns_(sh, userHeaders.length + 1, headers.length);
 }
 

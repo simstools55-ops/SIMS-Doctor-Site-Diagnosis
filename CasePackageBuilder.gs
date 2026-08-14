@@ -39,6 +39,11 @@ function sdsdEnrichSelectedCases(options) {
     }
   });
 
+  const firstTechnicalCol = headers.indexOf('Batch Order') + 1;
+  if (firstTechnicalCol > 0) {
+    sdsdHideTechnicalColumns_(sh, firstTechnicalCol, headers.length);
+  }
+
   const cache = CacheService.getDocumentCache();
   let ready = 0;
   let failed = 0;
@@ -164,6 +169,10 @@ function sdsdEnrichSelectedCases(options) {
     sh.getRange(r+1, idx['Referral Status']+1).setValue('READY_FOR_INDIVIDUAL_DOCTOR');
     sh.getRange(r+1, idx['Case Package Status']+1).setValue('READY');
     ready++;
+  }
+
+  if (firstTechnicalCol > 0) {
+    sdsdHideTechnicalColumns_(sh, firstTechnicalCol, sh.getLastColumn());
   }
 
   const result = {ready: ready, failed: failed};

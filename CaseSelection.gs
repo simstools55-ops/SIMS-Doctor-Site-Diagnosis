@@ -39,6 +39,7 @@ function sdsdBuildTreatmentBatch(options) {
 
   const queryMap = sdsdBuildQueryEvidenceMap_();
   const historyMap = sdsdBuildHistoryMap_();
+  const articleMap = sdsdArticleTitleMap_();
   const batchId = sdsdCreateBatchId_();
 
   let out = ss.getSheetByName(SDSD_CONFIG.sheets.selectedCases);
@@ -46,7 +47,7 @@ function sdsdBuildTreatmentBatch(options) {
   out.clear();
 
   const userHeaders = [
-    'No.','記事URL','診断優先度','選定理由','状態'
+    'No.','記事タイトル','記事URL','優先度','選定理由','サイト全体での意味'
   ];
   const technicalHeaders = [
     'Batch Order','Site Priority','URL','TVS','Weekly Trend','Evidence Confidence',
@@ -107,12 +108,20 @@ function sdsdBuildTreatmentBatch(options) {
     const priorityJa = sitePriority === 'A1' ? '最優先' : sitePriority === 'A2' ? '優先' : sitePriority;
     const reason = String(r[idx['Reason']] || '');
 
+    const displayRow = {
+      priority: String(r[idx['Priority Candidate']] || ''),
+      weeklyTrend: String(r[idx['Weekly Trend']] || ''),
+      externalFactor: String(r[idx['External Factor']] || ''),
+      reason: reason
+    };
+
     return [
       i+1,
+      sdsdDisplayTitle_(url, articleMap),
       url,
       priorityJa,
-      reason,
-      'Doctor診断待ち',
+      sdsdReasonJa_(reason),
+      sdsdSiteMeaning_(displayRow),
 
       i+1,
       sitePriority,
@@ -136,10 +145,13 @@ function sdsdBuildTreatmentBatch(options) {
   }
   out.setFrozenRows(1);
   out.getRange(1,1,1,userHeaders.length).setFontWeight('bold');
-  out.autoResizeColumns(1,userHeaders.length);
+  out.setColumnWidth(1, 70);
   out.setColumnWidth(2, 360);
-  out.setColumnWidth(4, 420);
-  out.setColumnWidth(5, 150);
+  out.setColumnWidth(3, 320);
+  out.setColumnWidth(4, 110);
+  out.setColumnWidth(5, 460);
+  out.setColumnWidth(6, 260);
+  out.getRange(1,1,Math.max(out.getLastRow(),1),userHeaders.length).setWrap(true);
   sdsdHideTechnicalColumns_(out, userHeaders.length + 1, outHeaders.length);
   if (!options.noActivate) ss.setActiveSheet(out);
 

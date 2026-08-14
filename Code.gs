@@ -17,6 +17,7 @@ function onOpen() {
     .addItem('1. 初期設定', 'sdsdInitialize')
     .addItem('2. Evidence Packageを読み込む', 'sdsdImportEvidencePackageZip')
     .addItem('3. サイト診断を実行', 'sdsdRunProductDiagnosis')
+    .addItem('サイト診断サマリーを見る', 'sdsdOpenSiteSummary')
     .addItem('4. 診断候補を見る', 'sdsdOpenCandidates')
     .addSeparator()
     .addItem('5. Treatment Batchを作成', 'sdsdCreateProductTreatmentBatch')
@@ -43,6 +44,11 @@ function sdsdImportHistoryHelp() {
   SpreadsheetApp.getUi().alert(
     'SBMの「改善履歴」CSVを _SDSD_SBM_HISTORY シートへ貼り付けてください。'
   );
+}
+
+function sdsdOpenSiteSummary() {
+  const sh = SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.summary);
+  if (sh) SpreadsheetApp.getActive().setActiveSheet(sh);
 }
 
 function sdsdOpenCandidates() {

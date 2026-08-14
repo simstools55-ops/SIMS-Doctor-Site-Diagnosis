@@ -93,6 +93,8 @@ function sdsdRunAnalysis(options) {
     universeStrategy: evidence.universeStrategy
   };
 
+  sdsdWriteSiteSummary_(scored, result);
+
   if (!options.silent) {
     SpreadsheetApp.getUi().alert(
       `サイト診断が完了しました。\n\n` +
