@@ -203,6 +203,54 @@ function sdsdPrecisionArticles_(group, cluster) {
   return Array.isArray(cluster.target_articles) ? cluster.target_articles : [];
 }
 
+
+function sdsdMergePlanArticles_(mergePlan) {
+  mergePlan = mergePlan || {};
+  const target = mergePlan.target_article || null;
+  const source = mergePlan.source_article || null;
+  const list = [];
+
+  [target, source].forEach(a => {
+    if (!a) return;
+    list.push({
+      site_id: String(a.site_id || ''),
+      article_id: String(a.article_id || ''),
+      article_title: String(a.article_title || ''),
+      article_url: String(a.article_url || a.url || '')
+    });
+  });
+
+  return list;
+}
+
+function sdsdMergePlanText_(mergePlan) {
+  mergePlan = mergePlan || {};
+  const target = mergePlan.target_article || {};
+  const source = mergePlan.source_article || {};
+
+  function articleLabel(a) {
+    return [
+      String(a.article_id || ''),
+      String(a.article_title || ''),
+      String(a.article_url || a.url || '')
+    ].filter(Boolean).join(' / ');
+  }
+
+  return {
+    survivor: articleLabel(target),
+    absorbed: articleLabel(source),
+    direction: String(
+      mergePlan.redirect_direction ||
+      (
+        articleLabel(source) && articleLabel(target)
+          ? `${articleLabel(source)} → ${articleLabel(target)}`
+          : ''
+      )
+    ),
+    content_to_absorb: String(mergePlan.content_to_absorb || '')
+  };
+}
+
 function sdsdConvertPrecisionResult_(obj) {
   const out = [];
   (obj.clusters || []).forEach((cluster, ci) => {
@@ -226,6 +274,20 @@ function sdsdConvertPrecisionResult_(obj) {
         cr.diagnosis_summary || cluster.diagnosis_summary || ''
       );
 
+      const mergePlan = g.merge_plan || cr.merge_plan || cluster.merge_plan || null;
+      let targetArticles = sdsdPrecisionArticles_(g, cluster);
+
+      // Precision MERGE results often provide article identities only inside merge_plan.
+      // Preserve that authoritative direction instead of leaving target_articles blank.
+      if (route === 'MERGE' && mergePlan) {
+        const mergeArticles = sdsdMergePlanArticles_(mergePlan);
+        if (mergeArticles.length) targetArticles = mergeArticles;
+      }
+
+      const mergeText = route === 'MERGE' && mergePlan
+        ? sdsdMergePlanText_(mergePlan)
+        : {survivor:'',absorbed:'',direction:'',content_to_absorb:''};
+
       out.push({
         diagnosis_case_id: caseId,
         parent_diagnosis_case_id: baseId,
@@ -233,7 +295,7 @@ function sdsdConvertPrecisionResult_(obj) {
         diagnosis_type: String(g.group_type || cluster.diagnosis_type || cluster.improvement_type || ''),
         absorbed_source_case_ids: Array.isArray(cluster.absorbed_source_case_ids)
           ? cluster.absorbed_source_case_ids.map(String) : [],
-        target_articles: sdsdPrecisionArticles_(g, cluster),
+        target_articles: targetArticles,
         doctor_decision: String(g.doctor_decision || g.decision || cr.doctor_decision || route),
         confidence: String(g.confidence || cr.confidence || cluster.confidence || ''),
         site_impact: String(g.site_impact || cr.site_impact || cluster.site_impact || ''),
@@ -243,7 +305,12 @@ function sdsdConvertPrecisionResult_(obj) {
         reason: summary,
         additional_evidence_needed: Array.isArray(g.additional_evidence_needed)
           ? g.additional_evidence_needed.map(String) : [],
-        precision_group_type: groupLabel
+        precision_group_type: groupLabel,
+        merge_plan: mergePlan || null,
+        merge_survivor: mergeText.survivor,
+        merge_absorbed: mergeText.absorbed,
+        merge_direction: mergeText.direction,
+        merge_content_to_absorb: mergeText.content_to_absorb
       });
     });
   });
@@ -358,7 +425,12 @@ function sdsdNormalizeDoctorSiteWideResult_(obj) {
       eventual_route: String(c.eventual_route || ''),
       reason: String(c.reason || ''),
       additional_evidence_needed: Array.isArray(c.additional_evidence_needed)
-        ? c.additional_evidence_needed.map(String) : []
+        ? c.additional_evidence_needed.map(String) : [],
+      merge_plan: c.merge_plan || null,
+      merge_survivor: String(c.merge_survivor || ''),
+      merge_absorbed: String(c.merge_absorbed || ''),
+      merge_direction: String(c.merge_direction || ''),
+      merge_content_to_absorb: String(c.merge_content_to_absorb || '')
     }))
   };
 }
@@ -386,8 +458,8 @@ function sdsdWriteTreatmentPlan_(obj) {
 
   const headers = [
     '優先順','診断テーマ','Doctor判断','次の処置',
-    '対象記事','吸収した元案件','確信度','理由',
-    '追加Evidence','状態'
+    '対象記事','統合先（残す記事）','統合元（吸収する記事）','統合方向',
+    '吸収した元案件','確信度','理由','追加Evidence','状態'
   ];
 
   const routeJa = {
@@ -420,6 +492,9 @@ function sdsdWriteTreatmentPlan_(obj) {
       return [a.article_id,a.article_title,a.article_url]
         .filter(Boolean).join(' / ');
     }).join('\n'),
+    c.route_to === 'MERGE' ? String(c.merge_survivor || '') : '',
+    c.route_to === 'MERGE' ? String(c.merge_absorbed || '') : '',
+    c.route_to === 'MERGE' ? String(c.merge_direction || '') : '',
     (c.absorbed_source_case_ids || []).join(' / '),
     c.confidence,
     c.reason,
@@ -435,7 +510,7 @@ function sdsdWriteTreatmentPlan_(obj) {
   sh.setFrozenRows(1);
   sh.getRange(1,1,1,headers.length).setFontWeight('bold');
   sh.getRange(1,1,Math.max(rows.length+1,1),headers.length).setWrap(true);
-  [70,260,220,220,430,300,90,460,360,130]
+  [70,260,220,220,430,360,360,420,300,90,460,360,130]
     .forEach((w,i) => sh.setColumnWidth(i+1,w));
 
   ss.setActiveSheet(sh);
