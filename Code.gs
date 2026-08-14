@@ -27,6 +27,7 @@ function onOpen() {
     .addItem('8. サイト横断の改善機会を診断', 'sdsdRunSiteOpportunityDiagnosis')
     .addItem('9. サイト横断診断案件を作成', 'sdsdBuildSiteOpportunityCases')
     .addItem('10. サイト横断診断案件を見る', 'sdsdOpenSiteOpportunityCases')
+    .addItem('11. サイト横断Doctor Packageを生成', 'sdsdExportSiteWideDoctorPackage')
     .addSeparator()
     .addSubMenu(dataMenu)
     .addSubMenu(maintenanceMenu)
