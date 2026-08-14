@@ -192,11 +192,89 @@ function sdsdIsDoctorTriageShape_(obj) {
   );
 }
 
+function sdsdIsSiteWidePrecisionResult_(obj) {
+  return !!(obj && obj.format === 'SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1');
+}
+
+function sdsdPrecisionArticles_(group, cluster) {
+  const src = group || {};
+  const list = src.articles || src.target_articles || [];
+  if (Array.isArray(list) && list.length) return list;
+  return Array.isArray(cluster.target_articles) ? cluster.target_articles : [];
+}
+
+function sdsdConvertPrecisionResult_(obj) {
+  const out = [];
+  (obj.clusters || []).forEach((cluster, ci) => {
+    const cr = cluster.cluster_result || cluster.result || {};
+    const groups = Array.isArray(cr.sub_groups) && cr.sub_groups.length
+      ? cr.sub_groups
+      : [cr];
+
+    groups.forEach((g, gi) => {
+      const route = String(g.route_to || cr.route_to || cluster.route_to || '').toUpperCase();
+      if (!route) return;
+
+      const baseId = String(cluster.diagnosis_case_id || cluster.case_id || `PRECISION-${ci+1}`);
+      const caseId = groups.length > 1 ? `${baseId}#${gi+1}` : baseId;
+      const groupLabel = String(g.group_type || g.group_name || g.name || '');
+      const diagnosisTheme = String(
+        g.diagnosis_theme || g.theme || cluster.diagnosis_theme || cluster.theme || ''
+      );
+      const summary = String(
+        g.reason || g.rationale || g.diagnosis_summary ||
+        cr.diagnosis_summary || cluster.diagnosis_summary || ''
+      );
+
+      out.push({
+        diagnosis_case_id: caseId,
+        parent_diagnosis_case_id: baseId,
+        diagnosis_theme: groupLabel ? `${diagnosisTheme} / ${groupLabel}` : diagnosisTheme,
+        diagnosis_type: String(g.group_type || cluster.diagnosis_type || cluster.improvement_type || ''),
+        absorbed_source_case_ids: Array.isArray(cluster.absorbed_source_case_ids)
+          ? cluster.absorbed_source_case_ids.map(String) : [],
+        target_articles: sdsdPrecisionArticles_(g, cluster),
+        doctor_decision: String(g.doctor_decision || g.decision || cr.doctor_decision || route),
+        confidence: String(g.confidence || cr.confidence || cluster.confidence || ''),
+        site_impact: String(g.site_impact || cr.site_impact || cluster.site_impact || ''),
+        treatment_strategy: String(g.treatment_strategy || cr.treatment_strategy || ''),
+        route_to: route,
+        eventual_route: '',
+        reason: summary,
+        additional_evidence_needed: Array.isArray(g.additional_evidence_needed)
+          ? g.additional_evidence_needed.map(String) : [],
+        precision_group_type: groupLabel
+      });
+    });
+  });
+  return out;
+}
+
 function sdsdValidateSiteWideResult_(obj) {
-  if (!obj || obj.format !== 'SIMS_DOCTOR_SITE_WIDE_RESULT_V1') {
+  const isTriage = !!(obj && obj.format === 'SIMS_DOCTOR_SITE_WIDE_RESULT_V1');
+  const isPrecision = sdsdIsSiteWidePrecisionResult_(obj);
+
+  if (!isTriage && !isPrecision) {
     throw new Error(
-      '正式な横断診断結果ではありません。format は SIMS_DOCTOR_SITE_WIDE_RESULT_V1 が必要です。'
+      '正式な横断診断結果ではありません。format は SIMS_DOCTOR_SITE_WIDE_RESULT_V1 または SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1 が必要です。'
     );
+  }
+
+  if (isPrecision) {
+    if (!Array.isArray(obj.clusters) || !obj.clusters.length) {
+      throw new Error('Precision Result に clusters がありません。');
+    }
+    const converted = sdsdConvertPrecisionResult_(obj);
+    if (!converted.length) {
+      throw new Error('Precision Result から最終処置ルートを取得できません。clusters[].cluster_result.sub_groups[].route_to を確認してください。');
+    }
+    const allowedPrecision = {WRITER:true, MERGE:true, MONITOR:true, NO_ACTION:true, NEEDS_EVIDENCE:true};
+    converted.forEach((c,i) => {
+      if (!allowedPrecision[c.route_to]) {
+        throw new Error(`Precision Result の処置ルートが不正です: ${c.route_to} (${i+1})`);
+      }
+    });
+    return true;
   }
 
   if (!Array.isArray(obj.diagnosis_cases) && !sdsdIsDoctorTriageShape_(obj)) {
@@ -207,29 +285,15 @@ function sdsdValidateSiteWideResult_(obj) {
 
   if (Array.isArray(obj.diagnosis_cases)) {
     const allowed = {
-      WRITER:true,
-      MERGE:true,
-      CREATOR:true,
-      MONITOR:true,
-      NO_ACTION:true,
-      NEEDS_EVIDENCE:true
+      WRITER:true, MERGE:true, CREATOR:true, MONITOR:true,
+      NO_ACTION:true, NEEDS_EVIDENCE:true
     };
-
     obj.diagnosis_cases.forEach((c,i) => {
-      if (!c.diagnosis_case_id) {
-        throw new Error(`diagnosis_cases[${i}] に diagnosis_case_id がありません。`);
-      }
-      if (!Array.isArray(c.absorbed_source_case_ids)) {
-        throw new Error(`diagnosis_cases[${i}] に absorbed_source_case_ids がありません。`);
-      }
-      if (!allowed[String(c.route_to || '')]) {
-        throw new Error(
-          `diagnosis_cases[${i}] の route_to が不正です: ${c.route_to}`
-        );
-      }
+      if (!c.diagnosis_case_id) throw new Error(`diagnosis_cases[${i}] に diagnosis_case_id がありません。`);
+      if (!Array.isArray(c.absorbed_source_case_ids)) throw new Error(`diagnosis_cases[${i}] に absorbed_source_case_ids がありません。`);
+      if (!allowed[String(c.route_to || '')]) throw new Error(`diagnosis_cases[${i}] の route_to が不正です: ${c.route_to}`);
     });
   }
-
   return true;
 }
 
@@ -237,12 +301,15 @@ function sdsdNormalizeDoctorSiteWideResult_(obj) {
   const siteInput = obj.site || {};
   const fallbackSite = sdsdSiteMetaFromArticleMaster_();
 
-  const rawCases = Array.isArray(obj.diagnosis_cases)
-    ? obj.diagnosis_cases
-    : sdsdConvertDoctorTriageResult_(obj);
+  const rawCases = sdsdIsSiteWidePrecisionResult_(obj)
+    ? sdsdConvertPrecisionResult_(obj)
+    : (Array.isArray(obj.diagnosis_cases)
+      ? obj.diagnosis_cases
+      : sdsdConvertDoctorTriageResult_(obj));
 
   const overall =
     obj.overall_diagnosis ||
+    obj.overall_assessment ||
     (obj.site_wide_diagnosis
       ? obj.site_wide_diagnosis.overall_assessment
       : '') ||
@@ -385,7 +452,7 @@ function sdsdEnsureSiteWideResultImportSheet_() {
     sh.clear();
     sh.getRange('A1').setValue('Doctor横断診断結果をここに貼り付け');
     sh.getRange('A2').setValue(
-      'このセル以下に、Doctor回答全文または SIMS_DOCTOR_SITE_WIDE_RESULT_V1 JSON を貼り付けてください。\n' +
+      'このセル以下に、Doctor回答全文、SIMS_DOCTOR_SITE_WIDE_RESULT_V1 または SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1 JSON を貼り付けてください。\n' +
       '貼り付け後、メニュー「12. Doctor横断診断結果を登録」をもう一度実行します。'
     );
     sh.getRange('A1').setFontWeight('bold').setFontSize(14);
@@ -403,7 +470,7 @@ function sdsdReadSiteWideResultImportText_() {
     .map(r => String(r[0] || ''));
 
   const placeholder =
-    'このセル以下に、Doctor回答全文または SIMS_DOCTOR_SITE_WIDE_RESULT_V1 JSON を貼り付けてください。';
+    'このセル以下に、Doctor回答全文、SIMS_DOCTOR_SITE_WIDE_RESULT_V1 または SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1 JSON を貼り付けてください。';
 
   const cleaned = vals.filter((v,i) => {
     if (!String(v || '').trim()) return false;
@@ -427,7 +494,7 @@ function sdsdClearSiteWideResultImport_() {
     sh.getRange(2,1,Math.max(sh.getLastRow()-1,1),1).clearContent();
   }
   sh.getRange('A2').setValue(
-    'このセル以下に、Doctor回答全文または SIMS_DOCTOR_SITE_WIDE_RESULT_V1 JSON を貼り付けてください。\n' +
+    'このセル以下に、Doctor回答全文、SIMS_DOCTOR_SITE_WIDE_RESULT_V1 または SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1 JSON を貼り付けてください。\n' +
     '貼り付け後、メニュー「12. Doctor横断診断結果を登録」をもう一度実行します。'
   );
 }
