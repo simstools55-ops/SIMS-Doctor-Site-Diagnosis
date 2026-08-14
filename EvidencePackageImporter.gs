@@ -13,7 +13,7 @@ function sdsdExtractDriveFileId_(text) {
 }
 
 function sdsdImportEvidencePackageZip() {
-  sdsdEnsureSheets_();
+  sdsdProductEnsureSheets_();
 
   const ui = SpreadsheetApp.getUi();
   const prompt = ui.prompt(

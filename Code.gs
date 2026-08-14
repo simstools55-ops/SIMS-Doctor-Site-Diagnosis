@@ -31,7 +31,7 @@ function onOpen() {
 }
 
 function sdsdInitialize() {
-  sdsdEnsureSheets_();
+  sdsdProductEnsureSheets_();
   sdsdHideInternalSheets_();
   SpreadsheetApp.getUi().alert(
     `SIMS Doctor Site Diagnosis ${SDSD_VERSION}\n初期設定が完了しました。\n\n次に「2. Evidence Packageを読み込む」を実行してください。`

@@ -9,6 +9,67 @@ const SDSD_INTERNAL_SHEET_NAMES_ = Object.freeze([
   'Query Evidence Diagnostics'
 ]);
 
+
+function sdsdProductEnsureSheets_() {
+  const ss = SpreadsheetApp.getActive();
+
+  const legacyPairs = [
+    ['Site Diagnosis Candidates', SDSD_CONFIG.sheets.candidates],
+    ['Selected Treatment Cases', SDSD_CONFIG.sheets.selectedCases]
+  ];
+  legacyPairs.forEach(pair => {
+    const legacy = ss.getSheetByName(pair[0]);
+    const current = ss.getSheetByName(pair[1]);
+    if (legacy && !current) {
+      try { legacy.setName(pair[1]); } catch (e) {}
+    }
+  });
+
+  const names = [
+    SDSD_CONFIG.sheets.evidencePageSummary,
+    SDSD_CONFIG.sheets.evidencePageWeekly,
+    SDSD_CONFIG.sheets.evidencePageQuery,
+    SDSD_CONFIG.sheets.sbmHistory,
+    SDSD_CONFIG.sheets.candidates,
+    SDSD_CONFIG.sheets.selectedCases,
+    SDSD_CONFIG.sheets.articleMaster
+  ];
+
+  names.forEach(name => {
+    let sh = ss.getSheetByName(name);
+    if (!sh) sh = ss.insertSheet(name);
+  });
+
+  sdsdHideUnusedDefaultSheet_();
+  sdsdHideInternalSheets_();
+}
+
+function sdsdHideUnusedDefaultSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  ['シート1', 'Sheet1'].forEach(name => {
+    const sh = ss.getSheetByName(name);
+    if (!sh) return;
+    const values = sh.getDataRange().getDisplayValues();
+    const hasContent = values.some(row => row.some(v => String(v).trim() !== ''));
+    if (!hasContent) {
+      try {
+        const candidates = ss.getSheetByName(SDSD_CONFIG.sheets.candidates);
+        if (candidates && ss.getActiveSheet().getSheetId() === sh.getSheetId()) {
+          ss.setActiveSheet(candidates);
+        }
+        sh.hideSheet();
+      } catch (e) {}
+    }
+  });
+}
+
+function sdsdHideTechnicalColumns_(sheet, firstTechnicalCol, totalCols) {
+  if (!sheet || totalCols < firstTechnicalCol) return;
+  try {
+    sheet.hideColumns(firstTechnicalCol, totalCols - firstTechnicalCol + 1);
+  } catch (e) {}
+}
+
 function sdsdProgress_(step, total, message) {
   try {
     SpreadsheetApp.getActive().toast(

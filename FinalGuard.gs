@@ -26,6 +26,18 @@ function sdsdRunFinalGuard(options) {
     }
   }
 
+  // 利用者向け「状態」列も同期する。
+  const userStatusIdx = headers.indexOf('状態');
+  if (userStatusIdx >= 0 && values.length > 1) {
+    const refreshed = sh.getDataRange().getValues();
+    const refIdx = headers.indexOf('Referral Status');
+    const statuses = refreshed.slice(1).map(r => {
+      const ref = String(r[refIdx] || '');
+      return [ref.indexOf('BLOCK') >= 0 ? '保留' : 'Doctor診断待ち'];
+    });
+    if (statuses.length) sh.getRange(2, userStatusIdx + 1, statuses.length, 1).setValues(statuses);
+  }
+
   const result = {checked: values.length - 1, blocked: blocked};
   if (!options.silent) {
     SpreadsheetApp.getUi().alert(

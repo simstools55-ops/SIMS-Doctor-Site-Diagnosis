@@ -45,11 +45,15 @@ function sdsdBuildTreatmentBatch(options) {
   if (!out) out = ss.insertSheet(SDSD_CONFIG.sheets.selectedCases);
   out.clear();
 
-  const outHeaders = [
+  const userHeaders = [
+    'No.','記事URL','診断優先度','選定理由','状態'
+  ];
+  const technicalHeaders = [
     'Batch Order','Site Priority','URL','TVS','Weekly Trend','Evidence Confidence',
     'Treatment Risk','External Factor','Ownership','Recent Treatment Guard',
     'Top Queries','Selection Reason','Referral Status','Referral JSON'
   ];
+  const outHeaders = userHeaders.concat(technicalHeaders);
   out.getRange(1,1,1,outHeaders.length).setValues([outHeaders]);
 
   const batchRows = selected.map((r,i) => {
@@ -99,9 +103,19 @@ function sdsdBuildTreatmentBatch(options) {
       site_diagnosis_batch_id: batchId
     };
 
+    const sitePriority = String(r[idx['Priority Candidate']] || '').replace('_CANDIDATE','');
+    const priorityJa = sitePriority === 'A1' ? '最優先' : sitePriority === 'A2' ? '優先' : sitePriority;
+    const reason = String(r[idx['Reason']] || '');
+
     return [
       i+1,
-      String(r[idx['Priority Candidate']] || '').replace('_CANDIDATE',''),
+      url,
+      priorityJa,
+      reason,
+      'Doctor診断待ち',
+
+      i+1,
+      sitePriority,
       url,
       Number(r[idx['TVS']] || 0),
       String(r[idx['Weekly Trend']] || ''),
@@ -111,7 +125,7 @@ function sdsdBuildTreatmentBatch(options) {
       String(r[idx['Ownership']] || ''),
       String(r[idx['Recent Treatment Guard']] || ''),
       queries.join(' / '),
-      String(r[idx['Reason']] || ''),
+      reason,
       'READY_FOR_CASE_ENRICHMENT',
       JSON.stringify(referral)
     ];
@@ -121,8 +135,12 @@ function sdsdBuildTreatmentBatch(options) {
     out.getRange(2,1,batchRows.length,outHeaders.length).setValues(batchRows);
   }
   out.setFrozenRows(1);
-  out.getRange(1,1,1,outHeaders.length).setFontWeight('bold');
-  out.autoResizeColumns(1,outHeaders.length);
+  out.getRange(1,1,1,userHeaders.length).setFontWeight('bold');
+  out.autoResizeColumns(1,userHeaders.length);
+  out.setColumnWidth(2, 360);
+  out.setColumnWidth(4, 420);
+  out.setColumnWidth(5, 150);
+  sdsdHideTechnicalColumns_(out, userHeaders.length + 1, outHeaders.length);
   if (!options.noActivate) ss.setActiveSheet(out);
 
   const status = selected.length < capacity.standardMin
@@ -147,7 +165,7 @@ function sdsdBuildTreatmentBatch(options) {
       `適格候補: ${eligible.length}件\n` +
       `今回選定: ${selected.length}件\n` +
       `${status}\n\n` +
-      `「Selected Treatment Cases」で結果を確認してください。`
+      `「${SDSD_CONFIG.sheets.selectedCases}」で結果を確認してください。`
     );
   }
   return result;

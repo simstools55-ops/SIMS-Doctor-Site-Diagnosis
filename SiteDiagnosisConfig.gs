@@ -6,8 +6,8 @@ const SDSD_CONFIG = Object.freeze({
     evidencePageWeekly: '_SDSD_PAGE_WEEKLY',
     evidencePageQuery: '_SDSD_PAGE_QUERY_TOP',
     sbmHistory: '_SDSD_SBM_HISTORY',
-    candidates: 'Site Diagnosis Candidates',
-    selectedCases: 'Selected Treatment Cases',
+    candidates: '診断候補',
+    selectedCases: '今回の診断対象',
     articleMaster: '_SDSD_ARTICLE_MASTER'
   },
   score: {

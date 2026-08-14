@@ -1,7 +1,7 @@
 function sdsdRunAnalysis(options) {
   options = options || {};
   sdsdProgress_(1, 5, 'Evidence Packageのデータを確認しています');
-  sdsdEnsureSheets_();
+  sdsdProductEnsureSheets_();
 
   const evidence = sdsdBuildEvidenceMap_();
   const evidenceMap = evidence.map;
