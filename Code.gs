@@ -29,6 +29,9 @@ function onOpen() {
     .addItem('10. サイト横断診断案件を見る', 'sdsdOpenSiteOpportunityCases')
     .addItem('11. サイト横断Doctor Packageを生成', 'sdsdExportSiteWideDoctorPackage')
     .addSeparator()
+    .addItem('12. Doctor横断診断結果を登録', 'sdsdRegisterSiteWideDoctorResult')
+    .addItem('13. サイト治療計画を見る', 'sdsdOpenTreatmentPlan')
+    .addSeparator()
     .addSubMenu(dataMenu)
     .addSubMenu(maintenanceMenu)
     .addToUi();
