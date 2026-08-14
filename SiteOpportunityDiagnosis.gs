@@ -206,6 +206,47 @@ function sdsdDetectRawSiteOpportunities_() {
   return out;
 }
 
+
+function sdsdParentThemeTokens_(q) {
+  const stop = {
+    'エラー':true,'エラーコード':true,'error':true,'コード':true,
+    'できない':true,'見れない':true,'見られない':true,'直し方':true,
+    '対処法':true,'原因':true,'方法':true,'やり方':true,'設定':true,
+    '最新版':true,'最新':true,'完全版':true,'解決':true
+  };
+
+  return sdsdQueryTokens_(q).filter(t => {
+    if (stop[t]) return false;
+    if (/^[0-9]{5,}$/.test(t)) return false;
+    if (/^[a-z]{1,5}-?[a-z0-9]{1,8}$/i.test(t) && /\d/.test(t)) return false;
+    return true;
+  });
+}
+
+function sdsdParentThemeKey_(q) {
+  const toks = sdsdParentThemeTokens_(q);
+  if (!toks.length) return sdsdNormalizeQuery_(q);
+  return toks.slice(0, 3).join(' ');
+}
+
+function sdsdParentThemeSimilarity_(a, b) {
+  const ka = sdsdParentThemeKey_(a);
+  const kb = sdsdParentThemeKey_(b);
+  if (!ka || !kb) return 0;
+  if (ka === kb) return 1;
+  if (ka.indexOf(kb) >= 0 || kb.indexOf(ka) >= 0) return 0.9;
+  return sdsdQuerySimilarity_(ka, kb);
+}
+
+function sdsdTargetOverlap_(a, b) {
+  const aa = {};
+  (a || []).forEach(x => aa[x] = true);
+  let common = 0;
+  (b || []).forEach(x => { if (aa[x]) common++; });
+  const denom = Math.max(Math.min((a||[]).length,(b||[]).length),1);
+  return common / denom;
+}
+
 function sdsdSameTargetSet_(a, b) {
   const aa = (a || []).slice().sort();
   const bb = (b || []).slice().sort();
@@ -219,16 +260,19 @@ function sdsdSameTargetSet_(a, b) {
 function sdsdCanClusterOpportunity_(cluster, item) {
   if (cluster.type !== item.type) return false;
 
-  // Cannibalization must concern the same pair/set of URLs.
   if (item.type === 'カニバリ疑い') {
-    if (!sdsdSameTargetSet_(cluster.targets, item.targets)) return false;
-  } else {
-    // New article / content gap must have the same lead URL.
-    if (!cluster.targets.length || !item.targets.length ||
-        cluster.targets[0] !== item.targets[0]) return false;
+    // Stage 1: same target set or strong overlap + same parent theme.
+    const exact = sdsdSameTargetSet_(cluster.targets, item.targets);
+    const overlap = sdsdTargetOverlap_(cluster.targets, item.targets);
+    const parentSim = sdsdParentThemeSimilarity_(cluster.theme, item.theme);
+    return exact || (overlap >= 0.5 && parentSim >= 0.6);
   }
 
-  return sdsdQuerySimilarity_(cluster.theme, item.theme) >= 0.45;
+  // New article / content gap: same lead URL and same parent theme.
+  if (!cluster.targets.length || !item.targets.length ||
+      cluster.targets[0] !== item.targets[0]) return false;
+
+  return sdsdParentThemeSimilarity_(cluster.theme, item.theme) >= 0.6;
 }
 
 function sdsdClusterSiteOpportunities_(raw) {
@@ -254,6 +298,7 @@ function sdsdClusterSiteOpportunities_(raw) {
         type: item.type,
         priority: item.priority,
         theme: item.theme,
+        parentTheme: sdsdParentThemeKey_(item.theme),
         queries: item.queries.slice(),
         targets: item.targets.slice(),
         totalImpressions: item.totalImpressions,
@@ -267,40 +312,45 @@ function sdsdClusterSiteOpportunities_(raw) {
 
     target.rawCount++;
     target.totalImpressions += item.totalImpressions;
+
     item.queries.forEach(q => {
       if (target.queries.indexOf(q) < 0) target.queries.push(q);
+    });
+    item.targets.forEach(u => {
+      if (target.targets.indexOf(u) < 0) target.targets.push(u);
     });
 
     if (item.priority < target.priority) target.priority = item.priority;
     if (item.confidence === '高') target.confidence = '高';
 
-    // Keep the shortest query as the representative theme in most cases.
+    const key = sdsdParentThemeKey_(item.theme);
+    if (key && key.length < target.parentTheme.length) {
+      target.parentTheme = key;
+    }
+
+    // Prefer a compact representative theme.
     if (String(item.theme).length < String(target.theme).length) {
       target.theme = item.theme;
     }
   });
 
   clusters.forEach(c => {
-    const queryPreview = c.queries.slice(0, 5).join(' / ');
-    const more = c.queries.length > 5
-      ? ` ほか${c.queries.length - 5}件`
-      : '';
+    const preview = c.queries.slice(0,5).join(' / ');
+    const more = c.queries.length > 5 ? ` ほか${c.queries.length-5}件` : '';
 
     if (c.type === 'カニバリ疑い') {
       c.evidence =
-        `近い検索意図の${c.queries.length}クエリを1案件に統合。` +
+        `親テーマ「${c.parentTheme || c.theme}」として${c.queries.length}クエリを1案件に統合。` +
         `対象記事${c.targets.length}本、合計${Math.round(c.totalImpressions)}表示。` +
-        ` 主なクエリ: ${queryPreview}${more}`;
+        ` 主なクエリ: ${preview}${more}`;
     } else if (c.type === '新規記事機会') {
       c.evidence =
-        `近い検索意図の${c.queries.length}クエリを1テーマに統合。` +
-        `合計${Math.round(c.totalImpressions)}表示。` +
-        ` 主なクエリ: ${queryPreview}${more}`;
+        `親テーマ「${c.parentTheme || c.theme}」として${c.queries.length}クエリを1テーマに統合。` +
+        `合計${Math.round(c.totalImpressions)}表示。 主なクエリ: ${preview}${more}`;
     } else {
       c.evidence =
-        `既存記事に関連する${c.queries.length}クエリを1テーマに統合。` +
-        `合計${Math.round(c.totalImpressions)}表示。` +
-        ` 主なクエリ: ${queryPreview}${more}`;
+        `親テーマ「${c.parentTheme || c.theme}」として既存記事に関連する${c.queries.length}クエリを統合。` +
+        `合計${Math.round(c.totalImpressions)}表示。 主なクエリ: ${preview}${more}`;
     }
   });
 
@@ -325,13 +375,14 @@ function sdsdWriteSiteOpportunities_(rows) {
 
   const titleMap = sdsdArticleTitleMap_();
   const headers = [
-    '優先順位','改善テーマ','検索テーマ','関連クエリ数',
+    '優先順位','改善テーマ','親テーマ','検索テーマ','関連クエリ数',
     '対象記事','根拠','確信度','推奨対応','担当'
   ];
 
   const values = rows.map((x,i) => [
     i+1,
     x.type,
+    x.parentTheme || x.theme,
     x.theme,
     x.queries.length,
     x.targets.map(u =>
@@ -355,7 +406,7 @@ function sdsdWriteSiteOpportunities_(rows) {
     1,1,Math.max(1,values.length+1),headers.length
   ).setWrap(true);
 
-  [70,150,240,100,430,500,90,360,120]
+  [70,150,220,240,100,430,500,90,360,120]
     .forEach((w,i) => sh.setColumnWidth(i+1,w));
 
   if (!values.length) {
@@ -398,7 +449,7 @@ function sdsdRunSiteOpportunityDiagnosis() {
       `（元候補 ${rawCounts['新規記事機会']||0}件）\n` +
       `コンテンツギャップ: ${counts['コンテンツギャップ']||0}テーマ` +
       `（元候補 ${rawCounts['コンテンツギャップ']||0}件）\n\n` +
-      `近い検索意図は1案件へまとめています。\n` +
+      `近い検索意図に加え、親テーマ単位でも1診断案件へまとめています。\n` +
       `これは一次候補であり、自動処置は行いません。`
     );
   } catch(e) {
