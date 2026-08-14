@@ -6,12 +6,14 @@ function sdsdArticleCacheKey_(articleId, url) {
 
 function sdsdEnrichSelectedCases(options) {
   options = options || {};
+  const maxPerRun = Number(options.maxPerRun || 3);
+
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName(SDSD_CONFIG.sheets.selectedCases);
   if (!sh) throw new Error('先に Treatment Batch を生成してください。');
 
   const values = sh.getDataRange().getValues();
-  if (values.length < 2) throw new Error('Selected Treatment Cases に案件がありません。');
+  if (values.length < 2) throw new Error('今回の診断対象に案件がありません。');
 
   const headers = values[0].map(String);
   const idx = {};
@@ -29,6 +31,7 @@ function sdsdEnrichSelectedCases(options) {
     'ArticleID','Article Title','Main Query','Article Fetch Status',
     'Case Package Status','Article Cache Key','Query Evidence Count'
   ];
+
   let lastCol = headers.length;
   extraHeaders.forEach(h => {
     if (idx[h] == null) {
@@ -41,15 +44,47 @@ function sdsdEnrichSelectedCases(options) {
 
   const firstTechnicalCol = headers.indexOf('Batch Order') + 1;
   if (firstTechnicalCol > 0) {
-    sdsdHideTechnicalColumns_(sh, firstTechnicalCol, headers.length);
+    sdsdHideTechnicalColumns_(sh, firstTechnicalCol, sh.getLastColumn());
   }
 
-  const cache = CacheService.getDocumentCache();
-  let ready = 0;
-  let failed = 0;
+  // Refresh values after any missing technical columns were added.
+  const data = sh.getDataRange().getValues();
+  const refreshedHeaders = data[0].map(String);
+  const col = {};
+  refreshedHeaders.forEach((h,i) => col[h] = i);
 
-  for (let r=1; r<values.length; r++) {
-    const url = String(values[r][idx['URL']] || '');
+  const cache = CacheService.getDocumentCache();
+  let alreadyReady = 0;
+  let processedThisRun = 0;
+  let newlyReady = 0;
+  let failed = 0;
+  let remaining = 0;
+
+  const candidateRows = [];
+
+  for (let r=1; r<data.length; r++) {
+    const url = String(data[r][col['URL']] || '');
+    if (!url) continue;
+
+    const referralStatus = String(data[r][col['Referral Status']] || '');
+    const packageStatus = String(data[r][col['Case Package Status']] || '');
+
+    if (referralStatus === 'READY_FOR_INDIVIDUAL_DOCTOR' && packageStatus === 'READY') {
+      alreadyReady++;
+      continue;
+    }
+
+    candidateRows.push(r);
+  }
+
+  // Work on only a small number per invocation. Existing READY rows are preserved.
+  const workRows = candidateRows.slice(0, maxPerRun);
+  remaining = Math.max(candidateRows.length - workRows.length, 0);
+
+  for (let wi=0; wi<workRows.length; wi++) {
+    const r = workRows[wi];
+    const row = data[r];
+    const url = String(row[col['URL']] || '');
     if (!url) continue;
 
     const master = articleMap[sdsdNormalizeUrl_(url)] || null;
@@ -57,34 +92,50 @@ function sdsdEnrichSelectedCases(options) {
     const title = master ? master.title : '';
     const mainQuery = master ? master.mainQuery : '';
     const queryEvidence = (queryMap[sdsdNormalizeUrl_(url)] || []).slice(0,10);
-    const fetched = sdsdFetchArticleEvidence_(url);
 
-    sh.getRange(r+1, idx['ArticleID']+1).setValue(articleId);
-    sh.getRange(r+1, idx['Article Title']+1).setValue(title || fetched.title);
-    sh.getRange(r+1, idx['Main Query']+1).setValue(mainQuery);
-    sh.getRange(r+1, idx['Article Fetch Status']+1).setValue(fetched.status);
-    sh.getRange(r+1, idx['Query Evidence Count']+1).setValue(queryEvidence.length);
-
-    if (idx['Top Queries'] != null) {
-      sh.getRange(r+1, idx['Top Queries']+1).setValue(
-        queryEvidence.map(q => q.query).join(' / ')
-      );
-    }
-
-    if (!master || !articleId || fetched.status !== 'VALID' ||
+    // Missing identity/search prerequisites are cheap to detect; do not fetch the page.
+    if (!master || !articleId ||
         (querySourceCount > 0 && queryEvidence.length === 0)) {
       let reviewReason = 'NEEDS_REVIEW';
       if (querySourceCount > 0 && queryEvidence.length === 0) {
         reviewReason = 'QUERY_EVIDENCE_MISSING';
       }
-      sh.getRange(r+1, idx['Case Package Status']+1).setValue(reviewReason);
-      sh.getRange(r+1, idx['Referral Status']+1).setValue('NEEDS_CASE_ENRICHMENT_REVIEW');
+
+      sh.getRange(r+1, col['ArticleID']+1).setValue(articleId);
+      sh.getRange(r+1, col['Article Title']+1).setValue(title);
+      sh.getRange(r+1, col['Main Query']+1).setValue(mainQuery);
+      sh.getRange(r+1, col['Query Evidence Count']+1).setValue(queryEvidence.length);
+      sh.getRange(r+1, col['Case Package Status']+1).setValue(reviewReason);
+      sh.getRange(r+1, col['Referral Status']+1).setValue('NEEDS_CASE_ENRICHMENT_REVIEW');
+
       failed++;
+      processedThisRun++;
+      continue;
+    }
+
+    const fetched = sdsdFetchArticleEvidence_(url);
+
+    sh.getRange(r+1, col['ArticleID']+1).setValue(articleId);
+    sh.getRange(r+1, col['Article Title']+1).setValue(title || fetched.title);
+    sh.getRange(r+1, col['Main Query']+1).setValue(mainQuery);
+    sh.getRange(r+1, col['Article Fetch Status']+1).setValue(fetched.status);
+    sh.getRange(r+1, col['Query Evidence Count']+1).setValue(queryEvidence.length);
+
+    if (col['Top Queries'] != null) {
+      sh.getRange(r+1, col['Top Queries']+1).setValue(
+        queryEvidence.map(q => q.query).join(' / ')
+      );
+    }
+
+    if (fetched.status !== 'VALID') {
+      sh.getRange(r+1, col['Case Package Status']+1).setValue('ARTICLE_FETCH_REVIEW');
+      sh.getRange(r+1, col['Referral Status']+1).setValue('NEEDS_CASE_ENRICHMENT_REVIEW');
+      failed++;
+      processedThisRun++;
       continue;
     }
 
     const cacheKey = sdsdArticleCacheKey_(articleId, url);
-    // Cache value limit is ~100 KB. If too large, export step will refetch it.
     let cached = false;
     try {
       if (fetched.articleHtml.length < 90000) {
@@ -93,33 +144,38 @@ function sdsdEnrichSelectedCases(options) {
       }
     } catch(e) {}
 
-    const oldReferral = String(values[r][idx['Referral JSON']] || '{}');
+    const oldReferral = String(row[col['Referral JSON']] || '{}');
     let referral = {};
     try { referral = JSON.parse(oldReferral); } catch(e) {}
 
     referral.format = 'SIMS_DOCTOR_INDIVIDUAL_CASE_PACKAGE_V1';
     referral.contract_version = '1.0';
     referral.case_identity = referral.case_identity || {};
-    const batchId = String(referral.site_diagnosis_batch_id || sdsdGetActiveBatchId_() || '');
+
+    const batchId = String(
+      referral.site_diagnosis_batch_id || sdsdGetActiveBatchId_() || ''
+    );
     const siteId = sdsdResolveSiteId_(master, url);
 
     referral.site_diagnosis_batch_id = batchId;
     referral.case_identity.site_diagnosis_case_id = String(
-      referral.case_identity.site_diagnosis_case_id || sdsdBuildSiteDiagnosisCaseId_(batchId, url)
+      referral.case_identity.site_diagnosis_case_id ||
+      sdsdBuildSiteDiagnosisCaseId_(batchId, url)
     );
     referral.case_identity.individual_case_id = String(
-      referral.case_identity.individual_case_id || sdsdBuildIndividualCaseId_(batchId, articleId)
+      referral.case_identity.individual_case_id ||
+      sdsdBuildIndividualCaseId_(batchId, articleId)
     );
     referral.case_identity.site_id = siteId;
     referral.case_identity.article_id = articleId;
     referral.case_identity.url = url;
     referral.case_identity.request_id = String(
-      referral.case_identity.request_id || referral.request_id || sdsdBuildRequestId_(batchId, articleId)
+      referral.case_identity.request_id ||
+      referral.request_id ||
+      sdsdBuildRequestId_(batchId, articleId)
     );
 
-    // Identity Contract: keep canonical identifiers at the top level as well as
-    // case_identity for backward compatibility. Doctor must inherit these values
-    // unchanged into SIMS_DOCTOR_CASE_RESULT_V2.
+    // RC4 Identity Contract: preserve canonical identifiers unchanged.
     referral.case_id = referral.case_identity.individual_case_id;
     referral.request_id = referral.case_identity.request_id;
     referral.site_diagnosis_case_id = referral.case_identity.site_diagnosis_case_id;
@@ -128,7 +184,6 @@ function sdsdEnrichSelectedCases(options) {
     referral.article_id = articleId;
     referral.article_url = url;
 
-    // IMPORTANT: article_html is deliberately NOT stored in the sheet.
     referral.article_evidence = {
       status: 'VALID',
       title: title || fetched.title,
@@ -164,23 +219,66 @@ function sdsdEnrichSelectedCases(options) {
       '既存の有効な独自情報・広告・アフィリエイト要素は保護対象として評価する'
     ];
 
-    sh.getRange(r+1, idx['Referral JSON']+1).setValue(JSON.stringify(referral));
-    sh.getRange(r+1, idx['Article Cache Key']+1).setValue(cacheKey);
-    sh.getRange(r+1, idx['Referral Status']+1).setValue('READY_FOR_INDIVIDUAL_DOCTOR');
-    sh.getRange(r+1, idx['Case Package Status']+1).setValue('READY');
-    ready++;
+    sh.getRange(r+1, col['Referral JSON']+1).setValue(JSON.stringify(referral));
+    sh.getRange(r+1, col['Article Cache Key']+1).setValue(cacheKey);
+    sh.getRange(r+1, col['Referral Status']+1).setValue('READY_FOR_INDIVIDUAL_DOCTOR');
+    sh.getRange(r+1, col['Case Package Status']+1).setValue('READY');
+
+    newlyReady++;
+    processedThisRun++;
   }
+
+  SpreadsheetApp.flush();
+
+  // Recalculate current totals from the sheet after saving this chunk.
+  const finalValues = sh.getDataRange().getValues();
+  const finalHeaders = finalValues[0].map(String);
+  const finalIdx = {};
+  finalHeaders.forEach((h,i) => finalIdx[h] = i);
+
+  let total = 0;
+  let readyTotal = 0;
+  let reviewTotal = 0;
+
+  finalValues.slice(1).forEach(r => {
+    if (!String(r[finalIdx['URL']] || '')) return;
+    total++;
+    const rs = String(r[finalIdx['Referral Status']] || '');
+    const ps = String(r[finalIdx['Case Package Status']] || '');
+
+    if (rs === 'READY_FOR_INDIVIDUAL_DOCTOR' && ps === 'READY') {
+      readyTotal++;
+    } else if (rs === 'NEEDS_CASE_ENRICHMENT_REVIEW') {
+      reviewTotal++;
+    }
+  });
+
+  const pending = Math.max(total - readyTotal - reviewTotal, 0);
 
   if (firstTechnicalCol > 0) {
     sdsdHideTechnicalColumns_(sh, firstTechnicalCol, sh.getLastColumn());
   }
 
-  const result = {ready: ready, failed: failed};
+  const result = {
+    total: total,
+    ready: readyTotal,
+    review: reviewTotal,
+    pending: pending,
+    processedThisRun: processedThisRun,
+    newlyReady: newlyReady,
+    alreadyReady: alreadyReady,
+    complete: pending === 0 && reviewTotal === 0
+  };
+
   if (!options.silent) {
     SpreadsheetApp.getUi().alert(
-      `Case Packageの準備が完了しました。\n準備完了: ${ready}件\n要確認: ${failed}件`
+      `Case Package準備\n\n` +
+      `準備完了: ${result.ready}/${result.total}件\n` +
+      `要確認: ${result.review}件\n` +
+      `未処理: ${result.pending}件`
     );
   }
+
   return result;
 }
 

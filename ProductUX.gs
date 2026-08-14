@@ -542,26 +542,42 @@ function sdsdCreateProductCasePackage() {
         `ArticleIDまで確認できた記事: ${coverage.withArticleId}件\n\n` +
         `「データ準備 → Article Masterの取込案内」から、` +
         `今回診断しているブログのSBM「記事管理」CSVを取り込んでください。\n\n` +
-        `記事管理データを取り込んだ後は、1～5をやり直さず、もう一度「7. Doctor Case Packageを生成」を実行できます。`
+        `取り込んだ後は1～5をやり直さず、もう一度「7. Doctor Case Packageを生成」を実行できます。`
       );
       return;
     }
 
-    sdsdProgress_(1, 3, '記事情報と検索データを確認しています');
-    const enrichment = sdsdEnrichSelectedCases({silent:true});
+    sdsdProgress_(1, 3, 'Doctor Case Packageを準備しています');
+    const enrichment = sdsdEnrichSelectedCases({
+      silent: true,
+      maxPerRun: 3
+    });
 
-    if (enrichment.failed > 0) {
-      sdsdRefreshSelectedCasesView_();
+    sdsdRefreshSelectedCasesView_();
+
+    if (enrichment.review > 0) {
       SpreadsheetApp.getUi().alert(
-        `Doctor Case Packageを生成できません。\n\n` +
-        `準備完了: ${enrichment.ready}件\n` +
-        `要確認: ${enrichment.failed}件\n\n` +
+        `Doctor Case Packageの準備中に要確認記事が見つかりました。\n\n` +
+        `準備完了: ${enrichment.ready}/${enrichment.total}件\n` +
+        `要確認: ${enrichment.review}件\n` +
+        `未処理: ${enrichment.pending}件\n\n` +
         `「6. 選定案件を見る」で要確認案件を確認してください。`
       );
       return;
     }
 
-    sdsdProgress_(2, 3, '記事本文をCase Packageへ添付しています');
+    if (!enrichment.complete) {
+      SpreadsheetApp.getUi().alert(
+        `Doctor Case Packageを準備しています。\n\n` +
+        `準備完了: ${enrichment.ready}/${enrichment.total}件\n` +
+        `未処理: ${enrichment.pending}件\n\n` +
+        `今回の処理結果は保存しました。\n` +
+        `もう一度「7. Doctor Case Packageを生成」を実行すると、未処理の記事から続けます。`
+      );
+      return;
+    }
+
+    sdsdProgress_(2, 3, '全記事の準備完了。ZIPを生成しています');
     const exported = sdsdExportDoctorCasePackageZip({silent:true});
 
     sdsdUpdateSummaryAfterPackage_(exported.caseCount, exported.fileUrl);
