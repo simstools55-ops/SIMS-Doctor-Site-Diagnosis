@@ -375,26 +375,111 @@ function sdsdWriteTreatmentPlan_(obj) {
   return rows.length;
 }
 
+
+function sdsdEnsureSiteWideResultImportSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(SDSD_CONFIG.sheets.siteWideResultImport);
+  if (!sh) sh = ss.insertSheet(SDSD_CONFIG.sheets.siteWideResultImport);
+
+  if (sh.getLastRow() === 0 || String(sh.getRange('A1').getValue() || '') !== 'Doctor横断診断結果をここに貼り付け') {
+    sh.clear();
+    sh.getRange('A1').setValue('Doctor横断診断結果をここに貼り付け');
+    sh.getRange('A2').setValue(
+      'このセル以下に、Doctor回答全文または SIMS_DOCTOR_SITE_WIDE_RESULT_V1 JSON を貼り付けてください。\n' +
+      '貼り付け後、メニュー「12. Doctor横断診断結果を登録」をもう一度実行します。'
+    );
+    sh.getRange('A1').setFontWeight('bold').setFontSize(14);
+    sh.getRange('A1:A2').setWrap(true);
+    sh.setColumnWidth(1, 1000);
+    sh.setRowHeight(2, 90);
+  }
+  return sh;
+}
+
+function sdsdReadSiteWideResultImportText_() {
+  const sh = sdsdEnsureSiteWideResultImportSheet_();
+  const last = Math.max(sh.getLastRow(), 2);
+  const vals = sh.getRange(2,1,last-1,1).getDisplayValues()
+    .map(r => String(r[0] || ''));
+
+  const placeholder =
+    'このセル以下に、Doctor回答全文または SIMS_DOCTOR_SITE_WIDE_RESULT_V1 JSON を貼り付けてください。';
+
+  const cleaned = vals.filter((v,i) => {
+    if (!String(v || '').trim()) return false;
+    if (i === 0 && String(v).indexOf(placeholder) >= 0) return false;
+    return true;
+  });
+
+  return cleaned.join('\n').trim();
+}
+
+function sdsdSetSiteWideRegisterStage_(stage, detail) {
+  const props = PropertiesService.getDocumentProperties();
+  props.setProperty('SDSD_SITE_WIDE_REGISTER_STAGE', String(stage || ''));
+  props.setProperty('SDSD_SITE_WIDE_REGISTER_DETAIL', String(detail || ''));
+  props.setProperty('SDSD_SITE_WIDE_REGISTER_AT', new Date().toISOString());
+}
+
+function sdsdClearSiteWideResultImport_() {
+  const sh = sdsdEnsureSiteWideResultImportSheet_();
+  if (sh.getLastRow() >= 2) {
+    sh.getRange(2,1,Math.max(sh.getLastRow()-1,1),1).clearContent();
+  }
+  sh.getRange('A2').setValue(
+    'このセル以下に、Doctor回答全文または SIMS_DOCTOR_SITE_WIDE_RESULT_V1 JSON を貼り付けてください。\n' +
+    '貼り付け後、メニュー「12. Doctor横断診断結果を登録」をもう一度実行します。'
+  );
+}
+
 function sdsdRegisterSiteWideDoctorResult() {
   const ui = SpreadsheetApp.getUi();
-  const prompt = ui.prompt(
-    'Doctor横断診断結果を登録',
-    'Doctor回答全文、または SIMS_DOCTOR_SITE_WIDE_RESULT_V1 JSON を貼り付けてください。',
-    ui.ButtonSet.OK_CANCEL
-  );
-  if (prompt.getSelectedButton() !== ui.Button.OK) return;
+  const ss = SpreadsheetApp.getActive();
 
   try {
-    const parsed = sdsdExtractJsonObject_(prompt.getResponseText());
+    sdsdSetSiteWideRegisterStage_('START', '登録開始');
+
+    const importSheet = sdsdEnsureSiteWideResultImportSheet_();
+    const sourceText = sdsdReadSiteWideResultImportText_();
+
+    if (!sourceText) {
+      sdsdSetSiteWideRegisterStage_('WAITING_INPUT', 'Doctor結果取込シートへ入力待ち');
+      ss.setActiveSheet(importSheet);
+      ui.alert(
+        'Doctor横断診断結果の取込準備ができました。\n\n' +
+        '「Doctor結果取込」シートのA2以下へ、Doctor回答全文を貼り付けてください。\n\n' +
+        '貼り付け後、もう一度\n' +
+        '「12. Doctor横断診断結果を登録」\n' +
+        'を実行してください。'
+      );
+      return;
+    }
+
+    sdsdSetSiteWideRegisterStage_('EXTRACT_JSON', `入力文字数: ${sourceText.length}`);
+    const parsed = sdsdExtractJsonObject_(sourceText);
+
+    sdsdSetSiteWideRegisterStage_('VALIDATE', parsed && parsed.format ? parsed.format : 'formatなし');
     sdsdValidateSiteWideResult_(parsed);
+
+    sdsdSetSiteWideRegisterStage_('NORMALIZE', 'Doctor結果を正規化');
     const normalized = sdsdNormalizeDoctorSiteWideResult_(parsed);
+
+    sdsdSetSiteWideRegisterStage_(
+      'STORE_RAW_RESULT',
+      `正規化案件数: ${(normalized.diagnosis_cases || []).length}`
+    );
     sdsdStoreSiteWideResult_(normalized);
+
+    sdsdSetSiteWideRegisterStage_('WRITE_TREATMENT_PLAN', 'サイト治療計画を生成');
     const count = sdsdWriteTreatmentPlan_(normalized);
 
     const counts = {};
     normalized.diagnosis_cases.forEach(c => {
       counts[c.route_to] = (counts[c.route_to] || 0) + 1;
     });
+
+    sdsdSetSiteWideRegisterStage_('COMPLETE', `登録完了 ${count}件`);
+    sdsdClearSiteWideResultImport_();
 
     ui.alert(
       `Doctor横断診断結果を登録しました。\n\n` +
@@ -406,8 +491,22 @@ function sdsdRegisterSiteWideDoctorResult() {
       `経過観察/処置不要: ${(counts.MONITOR || 0) + (counts.NO_ACTION || 0)}件\n\n` +
       `「サイト治療計画」を確認してください。`
     );
+
   } catch(e) {
-    ui.alert(`Doctor横断診断結果を登録できませんでした。\n\n${e.message || e}`);
+    const props = PropertiesService.getDocumentProperties();
+    const stage = String(
+      props.getProperty('SDSD_SITE_WIDE_REGISTER_STAGE') || 'UNKNOWN'
+    );
+    const message = String(e && e.message ? e.message : e);
+
+    sdsdSetSiteWideRegisterStage_('ERROR', `${stage}: ${message}`);
+
+    ui.alert(
+      `Doctor横断診断結果を登録できませんでした。\n\n` +
+      `処理段階: ${stage}\n` +
+      `エラー: ${message}\n\n` +
+      `Doctor結果取込シートの内容は残しています。`
+    );
     throw e;
   }
 }

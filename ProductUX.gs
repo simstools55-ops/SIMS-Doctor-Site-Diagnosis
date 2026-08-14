@@ -64,6 +64,7 @@ function sdsdProductEnsureSheets_() {
   if (!ss.getSheetByName(SDSD_CONFIG.sheets.opportunityCases)) ss.insertSheet(SDSD_CONFIG.sheets.opportunityCases);
   if (!ss.getSheetByName(SDSD_CONFIG.sheets.siteWideResult)) ss.insertSheet(SDSD_CONFIG.sheets.siteWideResult);
   if (!ss.getSheetByName(SDSD_CONFIG.sheets.treatmentPlan)) ss.insertSheet(SDSD_CONFIG.sheets.treatmentPlan);
+  if (!ss.getSheetByName(SDSD_CONFIG.sheets.siteWideResultImport)) ss.insertSheet(SDSD_CONFIG.sheets.siteWideResultImport);
 }
 
 function sdsdHideUnusedDefaultSheet_() {
