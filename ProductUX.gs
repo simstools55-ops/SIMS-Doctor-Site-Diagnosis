@@ -196,6 +196,7 @@ function sdsdWriteSiteSummary_(rows, result) {
   const total = result.total || rows.length;
   const a1 = rows.filter(r => r.priority === 'A1_CANDIDATE').length;
   const a2 = rows.filter(r => r.priority === 'A2_CANDIDATE').length;
+  const priorityCount = a1 + a2;
   const review = rows.filter(r =>
     r.priority === 'DOCTOR_REVIEW' || r.priority === 'REVIEW' ||
     r.priority === 'B_CANDIDATE' || r.priority === 'CANDIDATE'
@@ -212,22 +213,51 @@ function sdsdWriteSiteSummary_(rows, result) {
   const external = rows.filter(r => String(r.externalFactor || '') !== '').length;
 
   let selectedCount = 0;
+  let selectedUrls = {};
   try {
     const selected = ss.getSheetByName(SDSD_CONFIG.sheets.selectedCases);
     if (selected && selected.getLastRow() >= 2) {
       const vals = selected.getDataRange().getValues();
       const hdr = vals[0].map(String);
-      const urlCol = hdr.indexOf('URL') >= 0 ? hdr.indexOf('URL') :
-                     hdr.indexOf('記事URL');
+      const urlCol = hdr.indexOf('URL') >= 0 ? hdr.indexOf('URL') : hdr.indexOf('記事URL');
       if (urlCol >= 0) {
-        selectedCount = vals.slice(1).filter(r => String(r[urlCol] || '').trim()).length;
+        vals.slice(1).forEach(r => {
+          const u = String(r[urlCol] || '').trim();
+          if (u) selectedUrls[u] = true;
+        });
+        selectedCount = Object.keys(selectedUrls).length;
       }
     }
   } catch (e) {}
 
+  const priorityRows = rows.filter(r =>
+    r.priority === 'A1_CANDIDATE' || r.priority === 'A2_CANDIDATE'
+  );
+  const notSelected = priorityRows.filter(r => !selectedUrls[String(r.url || '').trim()]);
+  const notSelectedCount = Math.max(priorityCount - selectedCount, 0);
+
+  let notSelectedReason = '';
+  if (notSelectedCount > 0) {
+    const guardCount = notSelected.filter(r =>
+      String(r.guard || '').toUpperCase() !== '' &&
+      String(r.guard || '').toUpperCase() !== 'PASS'
+    ).length;
+    const riskCount = notSelected.filter(r =>
+      String(r.treatmentRisk || '').toUpperCase() === 'HIGH'
+    ).length;
+
+    if (guardCount > 0) {
+      notSelectedReason = `最終確認・保護条件により今回は見送り ${guardCount}記事`;
+    } else if (riskCount > 0) {
+      notSelectedReason = `処置リスクが高いため今回は見送り ${riskCount}記事`;
+    } else {
+      notSelectedReason = `Treatment Batchの選定上限・優先順位により今回は見送り ${notSelectedCount}記事`;
+    }
+  }
+
   let overall = 'サイト全体を一律に修正する状態ではありません。';
-  if ((a1 + a2) > 0) {
-    overall += ` 影響の大きい${a1 + a2}記事を優先してDoctorで原因を確認します。`;
+  if (priorityCount > 0) {
+    overall += ` 影響の大きい${priorityCount}記事を優先してDoctorで原因を確認します。`;
   }
   if (growth + protectedCount > 0) {
     overall += ' 回復・成長中の記事は保護し、不要な修正を避けます。';
@@ -236,8 +266,10 @@ function sdsdWriteSiteSummary_(rows, result) {
   const values = [
     ['サイト診断サマリー', ''],
     ['診断対象', `${total}記事`],
-    ['Doctor精密診断の優先候補', `${a1 + a2}記事（最優先 ${a1} / 優先 ${a2}）`],
+    ['Doctor精密診断の優先候補', `${priorityCount}記事（最優先 ${a1} / 優先 ${a2}）`],
     ['今回Doctorへ送る記事', selectedCount ? `${selectedCount}記事` : 'Treatment Batch作成前'],
+    ['今回送らない優先候補', selectedCount ? `${notSelectedCount}記事` : 'Treatment Batch作成前'],
+    ['今回送らない理由', selectedCount ? (notSelectedReason || 'なし') : 'Treatment Batch作成前'],
     ['追加確認が必要', `${review}記事`],
     ['SBMの日常改善向き', `${sbm}記事`],
     ['回復・成長中などの保護対象', `${protectedCount}記事`],
@@ -271,9 +303,9 @@ function sdsdWriteSiteSummary_(rows, result) {
   sh.getRange('A1:B1').merge();
   sh.getRange('A1').setValue('サイト診断サマリー');
   sh.getRange('A1').setFontWeight('bold').setFontSize(14);
-  sh.getRange('A10').setFontWeight('bold');
   sh.getRange('A12').setFontWeight('bold');
-  sh.getRange('A23').setFontWeight('bold');
+  sh.getRange('A14').setFontWeight('bold');
+  sh.getRange('A26').setFontWeight('bold');
   sh.getRange(1,1,values.length,1).setFontWeight('bold');
   sh.setColumnWidth(1, 250);
   sh.setColumnWidth(2, 650);
