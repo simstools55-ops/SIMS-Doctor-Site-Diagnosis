@@ -79,37 +79,159 @@ function sdsdSelectedTreatmentPlanMerge_() {
 
 function sdsdFindStoredMergeCase_(selected) {
   const result = sdsdReadStoredSiteWideResult_();
-  const cases = Array.isArray(result.diagnosis_cases) ? result.diagnosis_cases : [];
 
   const survivorId = String(selected.survivor.article_id || '');
   const absorbedId = String(selected.absorbed.article_id || '');
+  const theme = String(selected.diagnosis_theme || '');
+
+  // HF3a:
+  // Stored Doctor precision results can exist in either:
+  // 1) normalized diagnosis_cases[]
+  // 2) original clusters[].sub_groups[] / clusters[]
+  // Accept both instead of rejecting a valid registered precision result.
+  const candidates = [];
+
+  if (Array.isArray(result.diagnosis_cases)) {
+    result.diagnosis_cases.forEach(c => {
+      candidates.push({
+        raw: c,
+        diagnosis_theme: String(c.diagnosis_theme || c.theme || ''),
+        route_to: String(c.route_to || c.doctor_decision || ''),
+        merge_survivor: String(c.merge_survivor || c.survivor || ''),
+        merge_absorbed: String(c.merge_absorbed || c.absorbed || ''),
+        merge_direction: String(c.merge_direction || ''),
+        merge_content_to_absorb: String(c.merge_content_to_absorb || c.content_to_absorb || ''),
+        confidence: String(c.confidence || ''),
+        reason: String(c.reason || c.rationale || c.diagnosis_summary || ''),
+        treatment_strategy: String(c.treatment_strategy || ''),
+        diagnosis_case_id: String(c.diagnosis_case_id || c.parent_diagnosis_case_id || c.case_id || '')
+      });
+    });
+  }
+
+  if (Array.isArray(result.clusters)) {
+    result.clusters.forEach(cluster => {
+      const clusterTheme = String(cluster.diagnosis_theme || cluster.theme || cluster.cluster_theme || '');
+      const clusterCaseId = String(
+        cluster.diagnosis_case_id ||
+        cluster.case_id ||
+        cluster.parent_diagnosis_case_id ||
+        ''
+      );
+
+      const groups = Array.isArray(cluster.sub_groups) && cluster.sub_groups.length
+        ? cluster.sub_groups
+        : [cluster];
+
+      groups.forEach(g => {
+        const merge = g.merge_plan || g.merge || {};
+        candidates.push({
+          raw: g,
+          diagnosis_theme: String(g.diagnosis_theme || g.theme || clusterTheme),
+          route_to: String(g.route_to || g.doctor_decision || g.decision || ''),
+          merge_survivor: String(
+            g.merge_survivor ||
+            merge.survivor ||
+            merge.keep ||
+            ''
+          ),
+          merge_absorbed: String(
+            g.merge_absorbed ||
+            merge.absorbed ||
+            merge.remove ||
+            ''
+          ),
+          merge_direction: String(g.merge_direction || merge.direction || ''),
+          merge_content_to_absorb: String(
+            g.merge_content_to_absorb ||
+            g.content_to_absorb ||
+            merge.content_to_absorb ||
+            ''
+          ),
+          confidence: String(g.confidence || cluster.confidence || ''),
+          reason: String(
+            g.reason ||
+            g.rationale ||
+            g.diagnosis_summary ||
+            cluster.reason ||
+            cluster.rationale ||
+            cluster.diagnosis_summary ||
+            ''
+          ),
+          treatment_strategy: String(
+            g.treatment_strategy ||
+            cluster.treatment_strategy ||
+            ''
+          ),
+          diagnosis_case_id: String(
+            g.diagnosis_case_id ||
+            g.case_id ||
+            clusterCaseId
+          )
+        });
+      });
+    });
+  }
+
+  function containsId(value, id) {
+    if (!id) return true;
+    return String(value || '').indexOf(id) >= 0;
+  }
 
   let found = null;
 
-  for (let i=0; i<cases.length; i++) {
-    const c = cases[i];
-    if (String(c.route_to || '').toUpperCase() !== 'MERGE') continue;
+  // Strongest match: explicit merge direction IDs.
+  for (let i=0; i<candidates.length; i++) {
+    const c = candidates[i];
+    const route = String(c.route_to || '').toUpperCase();
+    const routeOk = !route || route === 'MERGE';
 
-    const s = String(c.merge_survivor || '');
-    const a = String(c.merge_absorbed || '');
-
-    const idMatch =
-      (!survivorId || s.indexOf(survivorId) >= 0) &&
-      (!absorbedId || a.indexOf(absorbedId) >= 0);
-
-    const themeMatch =
-      String(c.diagnosis_theme || '') === String(selected.diagnosis_theme || '');
-
-    if (idMatch || themeMatch) {
+    if (
+      routeOk &&
+      containsId(c.merge_survivor, survivorId) &&
+      containsId(c.merge_absorbed, absorbedId) &&
+      (survivorId || absorbedId)
+    ) {
       found = c;
       break;
     }
   }
 
+  // Fallback: theme + MERGE. Treatment Plan already contains the authoritative
+  // survivor/absorbed direction, so this is safe for referral generation.
   if (!found) {
-    throw new Error(
-      '保存済みDoctor精密診断結果から、このMERGE案件の正本データを特定できませんでした。'
-    );
+    for (let i=0; i<candidates.length; i++) {
+      const c = candidates[i];
+      const route = String(c.route_to || '').toUpperCase();
+      const themeMatch =
+        theme &&
+        String(c.diagnosis_theme || '').indexOf(theme.replace(/\s*\/.*$/, '')) >= 0;
+
+      if ((route === 'MERGE' || !route) && themeMatch) {
+        found = c;
+        break;
+      }
+    }
+  }
+
+  // Last safe fallback:
+  // If the registered result itself cannot expose the original cluster shape,
+  // use the already-registered Treatment Plan row as the authoritative merge
+  // direction. Do not fail merely because storage normalized away cluster fields.
+  if (!found) {
+    found = {
+      raw: {},
+      diagnosis_theme: theme,
+      route_to: 'MERGE',
+      merge_survivor: selected.survivor.raw,
+      merge_absorbed: selected.absorbed.raw,
+      merge_direction: selected.merge_direction,
+      merge_content_to_absorb: '',
+      confidence: selected.confidence,
+      reason: selected.reason,
+      treatment_strategy: '',
+      diagnosis_case_id: ''
+    };
   }
 
   return {
@@ -121,7 +243,11 @@ function sdsdFindStoredMergeCase_(selected) {
 function sdsdBuildMergeReferralObject_(selected, stored) {
   const result = stored.site_result || {};
   const c = stored.diagnosis_case || {};
-  const site = result.site || {};
+  const site = result.site || {
+    site_id: result.site_id || '',
+    site_name: result.site_name || '',
+    site_url: result.site_url || ''
+  };
 
   return {
     format: 'SIMS_MERGE_REFERRAL_V1',
@@ -130,8 +256,8 @@ function sdsdBuildMergeReferralObject_(selected, stored) {
     source: 'SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1',
     site_diagnosis_batch_id: String(result.site_diagnosis_batch_id || ''),
     diagnosis_case_id: String(
-      c.parent_diagnosis_case_id ||
       c.diagnosis_case_id ||
+      (c.raw && (c.raw.parent_diagnosis_case_id || c.raw.diagnosis_case_id || c.raw.case_id)) ||
       ''
     ),
     site: {
