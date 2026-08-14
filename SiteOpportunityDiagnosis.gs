@@ -207,6 +207,78 @@ function sdsdDetectRawSiteOpportunities_() {
 }
 
 
+
+function sdsdDiagnosisThemeKey_(item, articleMap) {
+  const type = String(item.type || '');
+  const theme = String(item.parentTheme || item.theme || '');
+  const targets = item.targets || [];
+
+  // For site-wide diagnosis, article titles give a stronger semantic anchor
+  // than raw error-code queries alone.
+  const titleTokens = [];
+  targets.forEach(url => {
+    const title = sdsdArticleTitleText_(articleMap, url);
+    sdsdParentThemeTokens_(title).forEach(t => {
+      if (titleTokens.indexOf(t) < 0) titleTokens.push(t);
+    });
+  });
+
+  const queryTokens = sdsdParentThemeTokens_(theme);
+
+  // Prefer product/service/topic tokens shared by article titles and query themes.
+  const shared = queryTokens.filter(t => titleTokens.indexOf(t) >= 0);
+
+  let base = '';
+  if (shared.length) {
+    base = shared.slice(0,3).join(' ');
+  } else if (titleTokens.length) {
+    base = titleTokens.slice(0,3).join(' ');
+  } else {
+    base = queryTokens.slice(0,3).join(' ');
+  }
+
+  // Preserve type boundary. A cannibalization case should not merge into a
+  // Creator opportunity even if the topic is identical.
+  return type + '|' + (base || sdsdNormalizeQuery_(theme));
+}
+
+function sdsdDiagnosisThemeSimilarity_(a, b) {
+  const ka = String(a || '').split('|').slice(1).join('|');
+  const kb = String(b || '').split('|').slice(1).join('|');
+  if (!ka || !kb) return 0;
+  if (ka === kb) return 1;
+  if (ka.indexOf(kb) >= 0 || kb.indexOf(ka) >= 0) return 0.9;
+  return sdsdQuerySimilarity_(ka, kb);
+}
+
+function sdsdCanMergeDiagnosisCases_(cluster, item, articleMap) {
+  if (cluster.type !== item.type) return false;
+
+  const itemKey = sdsdDiagnosisThemeKey_(item, articleMap);
+  const themeSim = sdsdDiagnosisThemeSimilarity_(cluster.diagnosisThemeKey, itemKey);
+
+  if (item.type === 'カニバリ疑い') {
+    const overlap = sdsdTargetOverlap_(cluster.targets, item.targets);
+    // Diagnosis cases may merge when topic is very close and at least one
+    // article overlaps, or when the topic is nearly identical.
+    return (themeSim >= 0.65 && overlap > 0) || themeSim >= 0.9;
+  }
+
+  // Creator / content-gap cases: same diagnosis topic plus either same lead
+  // article or very strong semantic identity.
+  const sameLead =
+    cluster.targets.length && item.targets.length &&
+    cluster.targets[0] === item.targets[0];
+
+  return (themeSim >= 0.7 && sameLead) || themeSim >= 0.9;
+}
+
+function sdsdBuildDiagnosisThemeLabel_(cluster) {
+  const raw = String(cluster.diagnosisThemeKey || '');
+  const label = raw.split('|').slice(1).join('|').trim();
+  return label || cluster.parentTheme || cluster.theme;
+}
+
 function sdsdParentThemeTokens_(q) {
   const stop = {
     'エラー':true,'エラーコード':true,'error':true,'コード':true,
@@ -281,20 +353,21 @@ function sdsdClusterSiteOpportunities_(raw) {
     b.totalImpressions - a.totalImpressions
   );
 
-  const clusters = [];
+  // Stage 1: query-intent / parent-theme clustering.
+  const stage1 = [];
 
   sorted.forEach(item => {
     let target = null;
 
-    for (let i=0; i<clusters.length; i++) {
-      if (sdsdCanClusterOpportunity_(clusters[i], item)) {
-        target = clusters[i];
+    for (let i=0; i<stage1.length; i++) {
+      if (sdsdCanClusterOpportunity_(stage1[i], item)) {
+        target = stage1[i];
         break;
       }
     }
 
     if (!target) {
-      clusters.push({
+      stage1.push({
         type: item.type,
         priority: item.priority,
         theme: item.theme,
@@ -328,33 +401,94 @@ function sdsdClusterSiteOpportunities_(raw) {
       target.parentTheme = key;
     }
 
-    // Prefer a compact representative theme.
     if (String(item.theme).length < String(target.theme).length) {
       target.theme = item.theme;
     }
   });
 
-  clusters.forEach(c => {
+  // Stage 2: site-wide diagnosis-case clustering.
+  const articleMap = sdsdArticleTitleMap_();
+  const stage2 = [];
+
+  stage1.forEach(item => {
+    item.diagnosisThemeKey = sdsdDiagnosisThemeKey_(item, articleMap);
+
+    let target = null;
+    for (let i=0; i<stage2.length; i++) {
+      if (sdsdCanMergeDiagnosisCases_(stage2[i], item, articleMap)) {
+        target = stage2[i];
+        break;
+      }
+    }
+
+    if (!target) {
+      stage2.push({
+        type: item.type,
+        priority: item.priority,
+        theme: item.theme,
+        parentTheme: item.parentTheme,
+        diagnosisThemeKey: item.diagnosisThemeKey,
+        queries: item.queries.slice(),
+        targets: item.targets.slice(),
+        totalImpressions: item.totalImpressions,
+        confidence: item.confidence,
+        action: item.action,
+        destination: item.destination,
+        rawCount: item.rawCount,
+        parentCaseCount: 1
+      });
+      return;
+    }
+
+    target.parentCaseCount++;
+    target.rawCount += item.rawCount;
+    target.totalImpressions += item.totalImpressions;
+
+    item.queries.forEach(q => {
+      if (target.queries.indexOf(q) < 0) target.queries.push(q);
+    });
+    item.targets.forEach(u => {
+      if (target.targets.indexOf(u) < 0) target.targets.push(u);
+    });
+
+    if (item.priority < target.priority) target.priority = item.priority;
+    if (item.confidence === '高') target.confidence = '高';
+
+    if (String(item.theme).length < String(target.theme).length) {
+      target.theme = item.theme;
+    }
+  });
+
+  stage2.forEach(c => {
+    c.diagnosisTheme = sdsdBuildDiagnosisThemeLabel_(c);
+
     const preview = c.queries.slice(0,5).join(' / ');
-    const more = c.queries.length > 5 ? ` ほか${c.queries.length-5}件` : '';
+    const more = c.queries.length > 5
+      ? ` ほか${c.queries.length-5}件`
+      : '';
 
     if (c.type === 'カニバリ疑い') {
       c.evidence =
-        `親テーマ「${c.parentTheme || c.theme}」として${c.queries.length}クエリを1案件に統合。` +
+        `診断テーマ「${c.diagnosisTheme}」として` +
+        `${c.parentCaseCount}個の親テーマ案件、${c.queries.length}クエリを統合。` +
         `対象記事${c.targets.length}本、合計${Math.round(c.totalImpressions)}表示。` +
         ` 主なクエリ: ${preview}${more}`;
     } else if (c.type === '新規記事機会') {
       c.evidence =
-        `親テーマ「${c.parentTheme || c.theme}」として${c.queries.length}クエリを1テーマに統合。` +
-        `合計${Math.round(c.totalImpressions)}表示。 主なクエリ: ${preview}${more}`;
+        `診断テーマ「${c.diagnosisTheme}」として` +
+        `${c.parentCaseCount}個の親テーマ、${c.queries.length}クエリを統合。` +
+        `合計${Math.round(c.totalImpressions)}表示。` +
+        ` 主なクエリ: ${preview}${more}`;
     } else {
       c.evidence =
-        `親テーマ「${c.parentTheme || c.theme}」として既存記事に関連する${c.queries.length}クエリを統合。` +
-        `合計${Math.round(c.totalImpressions)}表示。 主なクエリ: ${preview}${more}`;
+        `診断テーマ「${c.diagnosisTheme}」として` +
+        `${c.parentCaseCount}個の親テーマ、${c.queries.length}クエリを統合。` +
+        `合計${Math.round(c.totalImpressions)}表示。` +
+        ` 主なクエリ: ${preview}${more}`;
     }
   });
 
-  return clusters.sort((a,b) =>
+  return stage2.sort((a,b) =>
     a.priority - b.priority ||
     a.type.localeCompare(b.type,'ja') ||
     b.totalImpressions - a.totalImpressions
@@ -375,13 +509,14 @@ function sdsdWriteSiteOpportunities_(rows) {
 
   const titleMap = sdsdArticleTitleMap_();
   const headers = [
-    '優先順位','改善テーマ','親テーマ','検索テーマ','関連クエリ数',
+    '優先順位','改善テーマ','診断テーマ','親テーマ','検索テーマ','関連クエリ数',
     '対象記事','根拠','確信度','推奨対応','担当'
   ];
 
   const values = rows.map((x,i) => [
     i+1,
     x.type,
+    x.diagnosisTheme || x.parentTheme || x.theme,
     x.parentTheme || x.theme,
     x.theme,
     x.queries.length,
@@ -406,7 +541,7 @@ function sdsdWriteSiteOpportunities_(rows) {
     1,1,Math.max(1,values.length+1),headers.length
   ).setWrap(true);
 
-  [70,150,220,240,100,430,500,90,360,120]
+  [70,150,220,220,240,100,430,520,90,360,120]
     .forEach((w,i) => sh.setColumnWidth(i+1,w));
 
   if (!values.length) {
@@ -449,7 +584,7 @@ function sdsdRunSiteOpportunityDiagnosis() {
       `（元候補 ${rawCounts['新規記事機会']||0}件）\n` +
       `コンテンツギャップ: ${counts['コンテンツギャップ']||0}テーマ` +
       `（元候補 ${rawCounts['コンテンツギャップ']||0}件）\n\n` +
-      `近い検索意図に加え、親テーマ単位でも1診断案件へまとめています。\n` +
+      `検索意図 → 親テーマ → 診断テーマの3段階で、Doctorが一度に判断すべき案件へまとめています。\n` +
       `これは一次候補であり、自動処置は行いません。`
     );
   } catch(e) {
