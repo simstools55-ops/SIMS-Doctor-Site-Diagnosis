@@ -184,6 +184,7 @@ function sdsdBuildTreatmentBatch(options) {
 }
 
 function sdsdOpenSelectedCases() {
+  try { sdsdRefreshSelectedCasesView_(); } catch (e) {}
   const sh = SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.selectedCases);
   if (sh) SpreadsheetApp.getActive().setActiveSheet(sh);
 }

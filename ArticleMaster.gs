@@ -37,8 +37,11 @@ function sdsdBuildArticleMasterMap_() {
 
 function sdsdArticleMasterImportHelp() {
   SpreadsheetApp.getUi().alert(
-    'SBMの「記事管理」シートをCSVで保存し、_SDSD_ARTICLE_MASTER シートへインポートしてください。\n\n' +
-    'ファイル → インポート → アップロード → 現在のシートを置換\n\n' +
-    'ArticleID・記事タイトル・URL・メインクエリをCase Packageへ利用します。'
+    'Doctor Case Packageを作るには、今回診断しているブログのSBM「記事管理」データが必要です。\n\n' +
+    '1. SBMで「記事管理」シートをCSVとして保存します。\n' +
+    '2. Site Diagnosisの内部シート「_SDSD_ARTICLE_MASTER」へインポートします。\n' +
+    '3. Googleスプレッドシートの「ファイル → インポート → アップロード → 現在のシートを置換」を使用します。\n\n' +
+    'ArticleID・記事タイトル・URL・メインクエリをCase Packageへ利用します。\n' +
+    '別ブログの記事管理データではCase Packageを生成できません。'
   );
 }

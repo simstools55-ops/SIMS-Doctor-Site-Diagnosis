@@ -280,6 +280,143 @@ function sdsdUpdateSummaryAfterPackage_(caseCount, fileUrl) {
   }
 }
 
+
+function sdsdHeaderIndexMap_(headers) {
+  const map = {};
+  headers.forEach((h,i) => map[String(h)] = i);
+  return map;
+}
+
+function sdsdRefreshCandidatesView_() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName(SDSD_CONFIG.sheets.candidates);
+  if (!sh || sh.getLastRow() < 2) return;
+
+  const values = sh.getDataRange().getValues();
+  const headers = values[0].map(String);
+  const idx = sdsdHeaderIndexMap_(headers);
+
+  if (idx['Normalized URL'] == null || idx['Priority Candidate'] == null) return;
+
+  const rows = values.slice(1)
+    .filter(r => String(r[idx['Normalized URL']] || ''))
+    .map(r => ({
+      url: String(r[idx['Normalized URL']] || ''),
+      tvs: Number(r[idx['TVS']] || 0),
+      demand: Number(r[idx['Demand']] || 0),
+      opportunity: Number(r[idx['Opportunity']] || 0),
+      urgency: Number(r[idx['Urgency']] || 0),
+      asset: Number(r[idx['Asset Value']] || 0),
+      ownership: String(r[idx['Ownership']] || ''),
+      guard: String(r[idx['Recent Treatment Guard']] || ''),
+      weeklyTrend: String(r[idx['Weekly Trend']] || ''),
+      evidenceConfidence: String(r[idx['Evidence Confidence']] || ''),
+      treatmentRisk: String(r[idx['Treatment Risk']] || ''),
+      externalFactor: String(r[idx['External Factor']] || ''),
+      priority: String(r[idx['Priority Candidate']] || ''),
+      reason: String(r[idx['Reason']] || '')
+    }));
+
+  if (rows.length) sdsdWriteCandidates_(rows);
+}
+
+function sdsdRefreshSelectedCasesView_() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName(SDSD_CONFIG.sheets.selectedCases);
+  if (!sh || sh.getLastRow() < 2) return;
+
+  const values = sh.getDataRange().getValues();
+  const headers = values[0].map(String);
+  const idx = sdsdHeaderIndexMap_(headers);
+
+  if (idx['URL'] == null || idx['Referral JSON'] == null) return;
+
+  const technicalHeaders = [
+    'Batch Order','Site Priority','URL','TVS','Weekly Trend','Evidence Confidence',
+    'Treatment Risk','External Factor','Ownership','Recent Treatment Guard',
+    'Top Queries','Selection Reason','Referral Status','Referral JSON',
+    'ArticleID','Article Title','Main Query','Article Fetch Status',
+    'Case Package Status','Article Cache Key','Query Evidence Count'
+  ].filter(h => idx[h] != null);
+
+  const articleMap = sdsdArticleTitleMap_();
+  const rows = values.slice(1).filter(r => String(r[idx['URL']] || ''));
+  if (!rows.length) return;
+
+  const userHeaders = [
+    'No.','記事タイトル','記事URL','優先度','選定理由','サイト全体での意味'
+  ];
+  const newHeaders = userHeaders.concat(technicalHeaders);
+
+  const newValues = rows.map((r,i) => {
+    const url = String(r[idx['URL']] || '');
+    const sitePriority = String(r[idx['Site Priority']] || '');
+    const priorityJa = sitePriority === 'A1' ? '最優先' : sitePriority === 'A2' ? '優先' : sitePriority || '要確認';
+    const reason = String(r[idx['Selection Reason']] || '');
+    const displayRow = {
+      priority: sitePriority === 'A1' ? 'A1_CANDIDATE' : sitePriority === 'A2' ? 'A2_CANDIDATE' : sitePriority,
+      weeklyTrend: String(r[idx['Weekly Trend']] || ''),
+      externalFactor: String(r[idx['External Factor']] || ''),
+      reason: reason
+    };
+
+    const titleFromSheet = idx['Article Title'] != null ? String(r[idx['Article Title']] || '') : '';
+    const visible = [
+      i+1,
+      titleFromSheet || sdsdDisplayTitle_(url, articleMap),
+      url,
+      priorityJa,
+      sdsdReasonJa_(reason),
+      sdsdSiteMeaning_(displayRow)
+    ];
+    const tech = technicalHeaders.map(h => r[idx[h]]);
+    return visible.concat(tech);
+  });
+
+  sh.clear();
+  sh.getRange(1,1,1,newHeaders.length).setValues([newHeaders]);
+  sh.getRange(2,1,newValues.length,newHeaders.length).setValues(newValues);
+  sh.setFrozenRows(1);
+  sh.getRange(1,1,1,userHeaders.length).setFontWeight('bold');
+  sh.setColumnWidth(1,70);
+  sh.setColumnWidth(2,360);
+  sh.setColumnWidth(3,320);
+  sh.setColumnWidth(4,110);
+  sh.setColumnWidth(5,460);
+  sh.setColumnWidth(6,260);
+  sh.getRange(1,1,Math.max(sh.getLastRow(),1),userHeaders.length).setWrap(true);
+  sdsdHideTechnicalColumns_(sh, userHeaders.length + 1, newHeaders.length);
+}
+
+function sdsdArticleMasterCoverageForSelected_() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName(SDSD_CONFIG.sheets.selectedCases);
+  if (!sh || sh.getLastRow() < 2) return {selected:0, matched:0, withArticleId:0};
+
+  const values = sh.getDataRange().getValues();
+  const headers = values[0].map(String);
+  const idx = sdsdHeaderIndexMap_(headers);
+  if (idx['URL'] == null) return {selected:0, matched:0, withArticleId:0};
+
+  const articleMap = sdsdBuildArticleMasterMap_();
+  let selected = 0;
+  let matched = 0;
+  let withArticleId = 0;
+
+  values.slice(1).forEach(r => {
+    const raw = String(r[idx['URL']] || '');
+    if (!raw) return;
+    selected++;
+    const master = articleMap[sdsdNormalizeUrl_(raw)] || null;
+    if (master) {
+      matched++;
+      if (String(master.articleId || '')) withArticleId++;
+    }
+  });
+
+  return {selected:selected, matched:matched, withArticleId:withArticleId};
+}
+
 function sdsdProgress_(step, total, message) {
   try {
     SpreadsheetApp.getActive().toast(
@@ -387,10 +524,34 @@ function sdsdCreateProductTreatmentBatch() {
 
 function sdsdCreateProductCasePackage() {
   try {
+    sdsdRefreshSelectedCasesView_();
+
+    const coverage = sdsdArticleMasterCoverageForSelected_();
+    if (coverage.selected === 0) {
+      SpreadsheetApp.getUi().alert(
+        'Doctor Case Packageを生成できません。\n\n今回の診断対象がありません。'
+      );
+      return;
+    }
+
+    if (coverage.withArticleId < coverage.selected) {
+      SpreadsheetApp.getUi().alert(
+        `Doctor Case Packageを生成する前に、今回のサイトの「記事管理」データが必要です。\n\n` +
+        `今回の診断対象: ${coverage.selected}件\n` +
+        `Article MasterでURL一致: ${coverage.matched}件\n` +
+        `ArticleIDまで確認できた記事: ${coverage.withArticleId}件\n\n` +
+        `「データ準備 → Article Masterの取込案内」から、` +
+        `今回診断しているブログのSBM「記事管理」CSVを取り込んでください。\n\n` +
+        `記事管理データを取り込んだ後は、1～5をやり直さず、もう一度「7. Doctor Case Packageを生成」を実行できます。`
+      );
+      return;
+    }
+
     sdsdProgress_(1, 3, '記事情報と検索データを確認しています');
     const enrichment = sdsdEnrichSelectedCases({silent:true});
 
     if (enrichment.failed > 0) {
+      sdsdRefreshSelectedCasesView_();
       SpreadsheetApp.getUi().alert(
         `Doctor Case Packageを生成できません。\n\n` +
         `準備完了: ${enrichment.ready}件\n` +
@@ -404,6 +565,7 @@ function sdsdCreateProductCasePackage() {
     const exported = sdsdExportDoctorCasePackageZip({silent:true});
 
     sdsdUpdateSummaryAfterPackage_(exported.caseCount, exported.fileUrl);
+    sdsdRefreshSelectedCasesView_();
     sdsdProgress_(3, 3, 'Doctor Case Packageを保存しました');
 
     SpreadsheetApp.getUi().alert(
@@ -415,8 +577,7 @@ function sdsdCreateProductCasePackage() {
     );
   } catch (e) {
     SpreadsheetApp.getUi().alert(
-      `Doctor Case Packageを生成できませんでした。\n\n${e.message || e}\n\n` +
-      `記事管理データとCase Package関連ファイルを確認してください。`
+      `Doctor Case Packageを生成できませんでした。\n\n${e.message || e}`
     );
     throw e;
   }

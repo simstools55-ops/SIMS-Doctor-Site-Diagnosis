@@ -52,6 +52,7 @@ function sdsdOpenSiteSummary() {
 }
 
 function sdsdOpenCandidates() {
+  try { sdsdRefreshCandidatesView_(); } catch (e) {}
   const sh = SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.candidates);
   if (sh) SpreadsheetApp.getActive().setActiveSheet(sh);
 }
