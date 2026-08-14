@@ -61,6 +61,7 @@ function sdsdProductEnsureSheets_() {
   sdsdHideUnusedDefaultSheet_();
   sdsdHideInternalSheets_();
   if (!ss.getSheetByName(SDSD_CONFIG.sheets.opportunities)) ss.insertSheet(SDSD_CONFIG.sheets.opportunities);
+  if (!ss.getSheetByName(SDSD_CONFIG.sheets.opportunityCases)) ss.insertSheet(SDSD_CONFIG.sheets.opportunityCases);
 }
 
 function sdsdHideUnusedDefaultSheet_() {
