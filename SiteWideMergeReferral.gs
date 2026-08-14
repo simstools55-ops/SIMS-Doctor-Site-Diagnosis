@@ -73,203 +73,116 @@ function sdsdSelectedTreatmentPlanMerge_() {
     merge_direction: value('統合方向'),
     confidence: value('確信度'),
     reason: value('理由'),
-    absorbed_source_case_ids_text: value('吸収した元案件')
+    absorbed_source_case_ids_text: value('吸収した元案件'),
+    diagnosis_case_id: value('診断案件ID'),
+    parent_diagnosis_case_id: value('元診断案件ID')
   };
 }
 
 function sdsdFindStoredMergeCase_(selected) {
-  const result = sdsdReadStoredSiteWideResult_();
-
-  const survivorId = String(selected.survivor.article_id || '');
-  const absorbedId = String(selected.absorbed.article_id || '');
-  const theme = String(selected.diagnosis_theme || '');
-
-  // HF3a:
-  // Stored Doctor precision results can exist in either:
-  // 1) normalized diagnosis_cases[]
-  // 2) original clusters[].sub_groups[] / clusters[]
-  // Accept both instead of rejecting a valid registered precision result.
-  const candidates = [];
-
-  if (Array.isArray(result.diagnosis_cases)) {
-    result.diagnosis_cases.forEach(c => {
-      candidates.push({
-        raw: c,
-        diagnosis_theme: String(c.diagnosis_theme || c.theme || ''),
-        route_to: String(c.route_to || c.doctor_decision || ''),
-        merge_survivor: String(c.merge_survivor || c.survivor || ''),
-        merge_absorbed: String(c.merge_absorbed || c.absorbed || ''),
-        merge_direction: String(c.merge_direction || ''),
-        merge_content_to_absorb: String(c.merge_content_to_absorb || c.content_to_absorb || ''),
-        confidence: String(c.confidence || ''),
-        reason: String(c.reason || c.rationale || c.diagnosis_summary || ''),
-        treatment_strategy: String(c.treatment_strategy || ''),
-        diagnosis_case_id: String(c.diagnosis_case_id || c.parent_diagnosis_case_id || c.case_id || '')
-      });
-    });
-  }
-
-  if (Array.isArray(result.clusters)) {
-    result.clusters.forEach(cluster => {
-      const clusterTheme = String(cluster.diagnosis_theme || cluster.theme || cluster.cluster_theme || '');
-      const clusterCaseId = String(
-        cluster.diagnosis_case_id ||
-        cluster.case_id ||
-        cluster.parent_diagnosis_case_id ||
-        ''
-      );
-
-      const groups = Array.isArray(cluster.sub_groups) && cluster.sub_groups.length
-        ? cluster.sub_groups
-        : [cluster];
-
-      groups.forEach(g => {
-        const merge = g.merge_plan || g.merge || {};
-        candidates.push({
-          raw: g,
-          diagnosis_theme: String(g.diagnosis_theme || g.theme || clusterTheme),
-          route_to: String(g.route_to || g.doctor_decision || g.decision || ''),
-          merge_survivor: String(
-            g.merge_survivor ||
-            merge.survivor ||
-            merge.keep ||
-            ''
-          ),
-          merge_absorbed: String(
-            g.merge_absorbed ||
-            merge.absorbed ||
-            merge.remove ||
-            ''
-          ),
-          merge_direction: String(g.merge_direction || merge.direction || ''),
-          merge_content_to_absorb: String(
-            g.merge_content_to_absorb ||
-            g.content_to_absorb ||
-            merge.content_to_absorb ||
-            ''
-          ),
-          confidence: String(g.confidence || cluster.confidence || ''),
-          reason: String(
-            g.reason ||
-            g.rationale ||
-            g.diagnosis_summary ||
-            cluster.reason ||
-            cluster.rationale ||
-            cluster.diagnosis_summary ||
-            ''
-          ),
-          treatment_strategy: String(
-            g.treatment_strategy ||
-            cluster.treatment_strategy ||
-            ''
-          ),
-          diagnosis_case_id: String(
-            g.diagnosis_case_id ||
-            g.case_id ||
-            clusterCaseId
-          )
-        });
-      });
-    });
-  }
-
-  function containsId(value, id) {
-    if (!id) return true;
-    return String(value || '').indexOf(id) >= 0;
-  }
-
-  let found = null;
-
-  // Strongest match: explicit merge direction IDs.
-  for (let i=0; i<candidates.length; i++) {
-    const c = candidates[i];
-    const route = String(c.route_to || '').toUpperCase();
-    const routeOk = !route || route === 'MERGE';
-
-    if (
-      routeOk &&
-      containsId(c.merge_survivor, survivorId) &&
-      containsId(c.merge_absorbed, absorbedId) &&
-      (survivorId || absorbedId)
-    ) {
-      found = c;
-      break;
-    }
-  }
-
-  // Fallback: theme + MERGE. Treatment Plan already contains the authoritative
-  // survivor/absorbed direction, so this is safe for referral generation.
-  if (!found) {
-    for (let i=0; i<candidates.length; i++) {
-      const c = candidates[i];
-      const route = String(c.route_to || '').toUpperCase();
-      const themeMatch =
-        theme &&
-        String(c.diagnosis_theme || '').indexOf(theme.replace(/\s*\/.*$/, '')) >= 0;
-
-      if ((route === 'MERGE' || !route) && themeMatch) {
-        found = c;
-        break;
-      }
-    }
-  }
-
-  // Last safe fallback:
-  // If the registered result itself cannot expose the original cluster shape,
-  // use the already-registered Treatment Plan row as the authoritative merge
-  // direction. Do not fail merely because storage normalized away cluster fields.
-  if (!found) {
-    found = {
-      raw: {},
-      diagnosis_theme: theme,
-      route_to: 'MERGE',
-      merge_survivor: selected.survivor.raw,
-      merge_absorbed: selected.absorbed.raw,
-      merge_direction: selected.merge_direction,
-      merge_content_to_absorb: '',
-      confidence: selected.confidence,
-      reason: selected.reason,
-      treatment_strategy: '',
-      diagnosis_case_id: ''
-    };
-  }
-
+  // HF4:
+  // The "サイト治療計画" row is already the registered Doctor decision.
+  // Do not re-open or re-validate stored Doctor JSON here.
+  // This removes the fragile dependency on internal storage format.
   return {
-    site_result: result,
-    diagnosis_case: found
+    site_result: null,
+    diagnosis_case: {
+      diagnosis_case_id: '',
+      diagnosis_theme: String(selected.diagnosis_theme || ''),
+      route_to: 'MERGE',
+      confidence: String(selected.confidence || ''),
+      reason: String(selected.reason || ''),
+      treatment_strategy: '',
+      merge_survivor: String(selected.survivor.raw || ''),
+      merge_absorbed: String(selected.absorbed.raw || ''),
+      merge_direction: String(selected.merge_direction || ''),
+      merge_content_to_absorb: ''
+    }
   };
 }
 
+
+function sdsdMergeReferralSiteMeta_(selected) {
+  const survivorUrl = String(
+    selected && selected.survivor ? selected.survivor.article_url : ''
+  );
+  const absorbedUrl = String(
+    selected && selected.absorbed ? selected.absorbed.article_url : ''
+  );
+
+  let meta = {site_id:'', site_name:'', site_url:''};
+
+  try {
+    if (typeof sdsdSiteMetaFromArticleMaster_ === 'function') {
+      const m = sdsdSiteMetaFromArticleMaster_();
+      if (m) {
+        meta.site_id = String(m.site_id || '');
+        meta.site_name = String(m.site_name || '');
+        meta.site_url = String(m.site_url || '');
+      }
+    }
+  } catch(e) {}
+
+  const anyUrl = survivorUrl || absorbedUrl;
+  if (!meta.site_url && anyUrl) {
+    const m = anyUrl.match(/^(https?:\/\/[^\/]+)/i);
+    if (m) meta.site_url = m[1] + '/';
+  }
+
+  if (!meta.site_id && anyUrl) {
+    try {
+      if (typeof sdsdSiteIdFromUrl_ === 'function') {
+        meta.site_id = String(sdsdSiteIdFromUrl_(anyUrl) || '');
+      }
+    } catch(e) {}
+  }
+
+  if (!meta.site_name) meta.site_name = meta.site_id;
+
+  return meta;
+}
+
+function sdsdMergeReferralBatchId_() {
+  try {
+    const props = PropertiesService.getDocumentProperties();
+    return String(
+      props.getProperty('SDSD_SITE_WIDE_BATCH_ID') ||
+      props.getProperty('SDSD_LAST_SITE_WIDE_BATCH_ID') ||
+      ''
+    );
+  } catch(e) {
+    return '';
+  }
+}
+
 function sdsdBuildMergeReferralObject_(selected, stored) {
-  const result = stored.site_result || {};
-  const c = stored.diagnosis_case || {};
-  const site = result.site || {
-    site_id: result.site_id || '',
-    site_name: result.site_name || '',
-    site_url: result.site_url || ''
-  };
+  const c = stored && stored.diagnosis_case ? stored.diagnosis_case : {};
+  const site = sdsdMergeReferralSiteMeta_(selected);
+
+  const diagnosisCaseId = String(
+    c.diagnosis_case_id ||
+    selected.parent_diagnosis_case_id ||
+    selected.diagnosis_case_id ||
+    ''
+  );
 
   return {
     format: 'SIMS_MERGE_REFERRAL_V1',
     contract_version: '1.0',
     generated_at: new Date().toISOString(),
-    source: 'SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1',
-    site_diagnosis_batch_id: String(result.site_diagnosis_batch_id || ''),
-    diagnosis_case_id: String(
-      c.diagnosis_case_id ||
-      (c.raw && (c.raw.parent_diagnosis_case_id || c.raw.diagnosis_case_id || c.raw.case_id)) ||
-      ''
-    ),
+    source: 'SITE_TREATMENT_PLAN',
+    site_diagnosis_batch_id: sdsdMergeReferralBatchId_(),
+    diagnosis_case_id: diagnosisCaseId,
     site: {
       site_id: String(site.site_id || ''),
       site_name: String(site.site_name || ''),
       site_url: String(site.site_url || '')
     },
     diagnosis: {
-      theme: String(selected.diagnosis_theme || c.diagnosis_theme || ''),
+      theme: String(selected.diagnosis_theme || ''),
       doctor_decision: 'MERGE',
-      confidence: String(selected.confidence || c.confidence || ''),
-      reason: String(selected.reason || c.reason || ''),
+      confidence: String(selected.confidence || ''),
+      reason: String(selected.reason || ''),
       treatment_strategy: String(c.treatment_strategy || '')
     },
     merge_plan: {
