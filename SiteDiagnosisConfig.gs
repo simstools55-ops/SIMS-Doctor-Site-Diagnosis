@@ -1,4 +1,4 @@
-const SDSD_VERSION = '0.4.0-RC4';
+const SDSD_VERSION = '0.4.0-RC5';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {

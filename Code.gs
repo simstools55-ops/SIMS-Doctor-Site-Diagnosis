@@ -1,30 +1,40 @@
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('SIMS Doctor Site Diagnosis')
-    .addItem('1. 初期化', 'sdsdInitialize')
-    .addItem('2. Evidence Package ZIPを読み込む', 'sdsdImportEvidencePackageZip')
-    .addItem('3. SBM改善履歴を取り込む', 'sdsdImportHistoryHelp')
-    .addItem('4. サイト分析を実行', 'sdsdRunAnalysis')
-    .addItem('5. 診断候補を開く', 'sdsdOpenCandidates')
-    .addItem('6. 週次トレンドを検証', 'sdsdValidateWeeklyTrends')
-    .addItem('7. 最終優先度を検証', 'sdsdValidateFinalPriorities')
+  const ui = SpreadsheetApp.getUi();
+
+  const dataMenu = ui.createMenu('データ準備')
+    .addItem('SBM改善履歴の取込案内', 'sdsdImportHistoryHelp')
+    .addItem('Article Masterの取込案内', 'sdsdArticleMasterImportHelp');
+
+  const maintenanceMenu = ui.createMenu('保守・診断')
+    .addItem('Query Evidenceを診断', 'sdsdDiagnoseQueryEvidenceInput')
+    .addItem('週次トレンド検証表を作成', 'sdsdValidateWeeklyTrends')
+    .addItem('優先度検証表を作成', 'sdsdValidateFinalPriorities')
     .addSeparator()
-    .addItem('8. 治療バッチを作成', 'sdsdBuildTreatmentBatch')
-    .addItem('9. Final Guardを実行', 'sdsdRunFinalGuard')
-    .addItem('10. 選定案件を開く', 'sdsdOpenSelectedCases')
+    .addItem('内部シートを表示', 'sdsdShowInternalSheets')
+    .addItem('内部シートを隠す', 'sdsdHideInternalSheets');
+
+  ui.createMenu('SIMS Doctor Site Diagnosis')
+    .addItem('1. 初期設定', 'sdsdInitialize')
+    .addItem('2. Evidence Packageを読み込む', 'sdsdImportEvidencePackageZip')
+    .addItem('3. サイト診断を実行', 'sdsdRunProductDiagnosis')
+    .addItem('4. 診断候補を見る', 'sdsdOpenCandidates')
     .addSeparator()
-    .addItem('11. Article Master取込案内', 'sdsdArticleMasterImportHelp')
-    .addItem('12. Case Enrichmentを実行', 'sdsdEnrichSelectedCases')
-    .addItem('13. Doctor Case Package ZIPを生成', 'sdsdExportDoctorCasePackageZip')
+    .addItem('5. Treatment Batchを作成', 'sdsdCreateProductTreatmentBatch')
+    .addItem('6. 選定案件を見る', 'sdsdOpenSelectedCases')
+    .addItem('7. Doctor Case Packageを生成', 'sdsdCreateProductCasePackage')
     .addSeparator()
-    .addItem('保守: Query Evidenceを診断', 'sdsdDiagnoseQueryEvidenceInput')
+    .addSubMenu(dataMenu)
+    .addSubMenu(maintenanceMenu)
     .addToUi();
+
+  try { sdsdHideInternalSheets_(); } catch (e) {}
 }
 
 function sdsdInitialize() {
   sdsdEnsureSheets_();
+  sdsdHideInternalSheets_();
   SpreadsheetApp.getUi().alert(
-    `SIMS Doctor Site Diagnosis ${SDSD_VERSION}\n初期化しました。`
+    `SIMS Doctor Site Diagnosis ${SDSD_VERSION}\n初期設定が完了しました。\n\n次に「2. Evidence Packageを読み込む」を実行してください。`
   );
 }
 

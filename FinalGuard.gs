@@ -1,10 +1,11 @@
-function sdsdRunFinalGuard() {
+function sdsdRunFinalGuard(options) {
+  options = options || {};
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName(SDSD_CONFIG.sheets.selectedCases);
   if (!sh) throw new Error('先に Treatment Batch を生成してください。');
 
   const values = sh.getDataRange().getValues();
-  if (values.length < 2) return;
+  if (values.length < 2) return {checked:0, blocked:0};
 
   const headers = values[0].map(String);
   const idx = {};
@@ -25,7 +26,11 @@ function sdsdRunFinalGuard() {
     }
   }
 
-  SpreadsheetApp.getUi().alert(
-    `Final Guard完了\n再確認対象: ${values.length-1}件\nブロック: ${blocked}件`
-  );
+  const result = {checked: values.length - 1, blocked: blocked};
+  if (!options.silent) {
+    SpreadsheetApp.getUi().alert(
+      `最終確認が完了しました。\n再確認対象: ${result.checked}件\n保留: ${result.blocked}件`
+    );
+  }
+  return result;
 }

@@ -1,4 +1,5 @@
-function sdsdBuildTreatmentBatch() {
+function sdsdBuildTreatmentBatch(options) {
+  options = options || {};
   const ss = SpreadsheetApp.getActive();
   const source = ss.getSheetByName(SDSD_CONFIG.sheets.candidates);
   if (!source) throw new Error('先に Run Site Analysis を実行してください。');
@@ -122,21 +123,34 @@ function sdsdBuildTreatmentBatch() {
   out.setFrozenRows(1);
   out.getRange(1,1,1,outHeaders.length).setFontWeight('bold');
   out.autoResizeColumns(1,outHeaders.length);
-  ss.setActiveSheet(out);
+  if (!options.noActivate) ss.setActiveSheet(out);
 
   const status = selected.length < capacity.standardMin
     ? '標準件数未満ですが、数合わせせず終了'
     : '標準範囲内';
 
-  SpreadsheetApp.getUi().alert(
-    `Treatment Batch生成完了\n\n` +
-    `診断対象: ${articleCount}記事\n` +
-    `標準: ${capacity.standardMin}～${capacity.standardMax}件 / 最大${capacity.hardMax}件\n` +
-    `A1/A2適格候補: ${eligible.length}件\n` +
-    `今回選定: ${selected.length}件\n` +
-    `${status}\n\n` +
-    `Selected Treatment Cases を確認してください。`
-  );
+  const result = {
+    articleCount: articleCount,
+    eligibleCount: eligible.length,
+    selectedCount: selected.length,
+    standardMin: capacity.standardMin,
+    standardMax: capacity.standardMax,
+    hardMax: capacity.hardMax,
+    status: status
+  };
+
+  if (!options.silent) {
+    SpreadsheetApp.getUi().alert(
+      `Treatment Batchを作成しました。\n\n` +
+      `診断対象: ${articleCount}記事\n` +
+      `標準: ${capacity.standardMin}～${capacity.standardMax}件 / 最大${capacity.hardMax}件\n` +
+      `適格候補: ${eligible.length}件\n` +
+      `今回選定: ${selected.length}件\n` +
+      `${status}\n\n` +
+      `「Selected Treatment Cases」で結果を確認してください。`
+    );
+  }
+  return result;
 }
 
 function sdsdOpenSelectedCases() {

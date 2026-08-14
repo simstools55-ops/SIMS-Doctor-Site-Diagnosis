@@ -4,7 +4,8 @@ function sdsdArticleCacheKey_(articleId, url) {
   return 'SDSD_ARTICLE_' + digest.map(b => ('0' + ((b + 256) % 256).toString(16)).slice(-2)).join('');
 }
 
-function sdsdEnrichSelectedCases() {
+function sdsdEnrichSelectedCases(options) {
+  options = options || {};
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName(SDSD_CONFIG.sheets.selectedCases);
   if (!sh) throw new Error('先に Treatment Batch を生成してください。');
@@ -165,13 +166,17 @@ function sdsdEnrichSelectedCases() {
     ready++;
   }
 
-  SpreadsheetApp.getUi().alert(
-    `Case Enrichment完了\nReady: ${ready}件\n要確認: ${failed}件\n\n` +
-    `記事本文はセルへ保存せず、ZIP生成時に安全に添付します。`
-  );
+  const result = {ready: ready, failed: failed};
+  if (!options.silent) {
+    SpreadsheetApp.getUi().alert(
+      `Case Packageの準備が完了しました。\n準備完了: ${ready}件\n要確認: ${failed}件`
+    );
+  }
+  return result;
 }
 
-function sdsdExportDoctorCasePackageZip() {
+function sdsdExportDoctorCasePackageZip(options) {
+  options = options || {};
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName(SDSD_CONFIG.sheets.selectedCases);
   if (!sh) throw new Error('Selected Treatment Cases がありません。');
@@ -291,11 +296,21 @@ function sdsdExportDoctorCasePackageZip() {
 
   const file = DriveApp.createFile(Utilities.zip(blobs, zipName));
 
-  SpreadsheetApp.getUi().alert(
-    `Doctor Case Package ZIP生成完了\n\n` +
-    `案件数: ${rows.length}\n` +
-    `本文再取得: ${refetched}件\n` +
-    `Last error: (なし)\n\n` +
-    `保存先:\n${file.getUrl()}`
-  );
+  const result = {
+    caseCount: rows.length,
+    refetched: refetched,
+    fileUrl: file.getUrl(),
+    fileId: file.getId(),
+    fileName: file.getName()
+  };
+
+  if (!options.silent) {
+    SpreadsheetApp.getUi().alert(
+      `Doctor Case Packageの生成が完了しました。\n\n` +
+      `案件数: ${result.caseCount}件\n` +
+      `本文再取得: ${result.refetched}件\n\n` +
+      `Google Driveに保存しました。\n${result.fileUrl}`
+    );
+  }
+  return result;
 }

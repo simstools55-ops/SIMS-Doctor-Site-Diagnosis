@@ -1,4 +1,4 @@
-# SIMS Doctor Site Diagnosis v0.4.0-RC4
+# SIMS Doctor Site Diagnosis v0.4.0-RC5
 
 ## 目的
 
@@ -77,3 +77,17 @@ Collector側のStep 5 / Evidence再生成を確認してください。
 
 Case Packageは `request_id` を含む7つの主要Identityをトップレベルへ固定出力します。Doctorはこれらを再生成せず、そのまま診断結果へ継承してください。
 
+
+
+## RC5 Product UX
+
+RC5は診断ロジックを変更せず、通常利用者向けUIを整理するリリース候補です。
+
+- 通常メニューを7項目へ整理
+- 開発・回帰検証機能を「保守・診断」へ隔離
+- 内部処理用シートを通常は非表示
+- サイト診断・Treatment Batch・Case Package生成に進捗Toastを追加
+- 完了メッセージを利用者向け日本語へ整理
+- Final GuardとCase Enrichmentを通常フロー内で自動実行
+
+RC4のCase Identity / request_id / Treatment選定ロジックは変更していません。

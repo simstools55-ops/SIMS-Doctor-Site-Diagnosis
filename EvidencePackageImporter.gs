@@ -96,7 +96,7 @@ function sdsdImportEvidencePackageZip() {
     `page_query_top: ${report[2].dataRows}行\n\n` +
     `Query URL数: ${diag.queryUrlCount}\n` +
     `Query行数: ${diag.queryRows}\n\n` +
-    `次に Run Site Analysis を実行してください。`
+    `次に「3. サイト診断を実行」を実行してください。`
   );
 }
 

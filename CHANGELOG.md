@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.4.0-RC5 - Product UX
+
+- Simplified the normal user menu to seven primary actions.
+- Moved developer/regression validation commands under Maintenance.
+- Hide internal diagnostic sheets during normal operation.
+- Added lightweight progress Toast messages for long-running product flows.
+- Added product wrappers for Site Diagnosis, Treatment Batch + Final Guard,
+  and Case Enrichment + Doctor Case Package export.
+- Rewrote completion messages for non-technical users.
+- Preserved RC4 Case Identity, request_id, diagnosis scoring, and treatment
+  selection logic without changes.
+
+# Changelog
+
 ## 0.4.0-RC4
 
 - Site Diagnosis Case Package に独立した `request_id` を必須発行。

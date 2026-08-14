@@ -16,6 +16,7 @@ function sdsdEnsureSheets_() {
       try { sh.hideSheet(); } catch (e) {}
     }
   });
+  try { sdsdHideInternalSheets_(); } catch (e) {}
 }
 
 function sdsdReadObjects_(sheetName) {

@@ -1,13 +1,20 @@
-function sdsdRunAnalysis() {
+function sdsdRunAnalysis(options) {
+  options = options || {};
+  sdsdProgress_(1, 5, 'Evidence Packageのデータを確認しています');
   sdsdEnsureSheets_();
 
   const evidence = sdsdBuildEvidenceMap_();
   const evidenceMap = evidence.map;
+
+  sdsdProgress_(2, 5, '改善履歴と記事状態を確認しています');
   const historyMap = sdsdBuildHistoryMap_();
+
+  sdsdProgress_(3, 5, '週次推移と検索クエリを分析しています');
   const weeklyMap = sdsdBuildWeeklyTrendMap_();
   const queryMap = sdsdBuildQueryEvidenceMap_();
   const items = Object.keys(evidenceMap).map(k => evidenceMap[k]);
 
+  sdsdProgress_(4, 5, '診断候補の優先度を評価しています');
   let scored = sdsdScoreAll_(items);
 
   scored = scored.map(x => {
@@ -68,12 +75,33 @@ function sdsdRunAnalysis() {
   });
 
   scored.sort((a,b) => b.tvs - a.tvs);
+  sdsdProgress_(5, 5, '診断結果を整理しています');
   sdsdWriteCandidates_(scored);
 
-  SpreadsheetApp.getUi().alert(
-    `Site Analysis完了\n対象記事: ${scored.length}\n` +
-    `Article Universe: ${evidence.universeCount} (${evidence.universeStrategy})\n` +
-    `Sprint 2: 週次Trend / Confidence / Risk / 外部要因を反映しました。\n` +
-    `上位候補を「${SDSD_CONFIG.sheets.candidates}」へ出力しました。`
-  );
+  const result = {
+    total: scored.length,
+    priorityCandidates: scored.filter(x =>
+      x.priority === 'A1_CANDIDATE' || x.priority === 'A2_CANDIDATE'
+    ).length,
+    wait: scored.filter(x => x.priority === 'WAIT').length,
+    protected: scored.filter(x => x.priority === 'PROTECTED').length,
+    sbm: scored.filter(x => x.priority === 'SBM').length,
+    review: scored.filter(x =>
+      x.priority === 'REVIEW' || x.priority === 'DOCTOR_REVIEW'
+    ).length,
+    universeCount: evidence.universeCount,
+    universeStrategy: evidence.universeStrategy
+  };
+
+  if (!options.silent) {
+    SpreadsheetApp.getUi().alert(
+      `サイト診断が完了しました。\n\n` +
+      `対象記事: ${result.total}件\n` +
+      `精密診断の優先候補: ${result.priorityCandidates}件\n` +
+      `最近処置済み・モニター中: ${result.wait}件\n` +
+      `回復・成長中のため保護: ${result.protected}件\n\n` +
+      `「${SDSD_CONFIG.sheets.candidates}」で結果を確認してください。`
+    );
+  }
+  return result;
 }
