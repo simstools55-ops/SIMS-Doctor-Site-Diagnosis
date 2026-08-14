@@ -318,18 +318,20 @@ function sdsdHeaderIndexMap_(headers) {
   return map;
 }
 
-function sdsdRefreshCandidatesView_() {
+function sdsdCandidateRowsFromSheet_() {
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName(SDSD_CONFIG.sheets.candidates);
-  if (!sh || sh.getLastRow() < 2) return;
+  if (!sh || sh.getLastRow() < 2) return [];
 
   const values = sh.getDataRange().getValues();
   const headers = values[0].map(String);
   const idx = sdsdHeaderIndexMap_(headers);
 
-  if (idx['Normalized URL'] == null || idx['Priority Candidate'] == null) return;
+  if (idx['Normalized URL'] == null || idx['Priority Candidate'] == null) {
+    return [];
+  }
 
-  const rows = values.slice(1)
+  return values.slice(1)
     .filter(r => String(r[idx['Normalized URL']] || ''))
     .map(r => ({
       url: String(r[idx['Normalized URL']] || ''),
@@ -347,8 +349,35 @@ function sdsdRefreshCandidatesView_() {
       priority: String(r[idx['Priority Candidate']] || ''),
       reason: String(r[idx['Reason']] || '')
     }));
+}
 
-  if (rows.length) sdsdWriteCandidates_(rows);
+function sdsdRefreshSiteSummaryFromCandidates_() {
+  const rows = sdsdCandidateRowsFromSheet_();
+  if (!rows.length) return false;
+
+  const result = {
+    total: rows.length,
+    priorityCandidates: rows.filter(r =>
+      r.priority === 'A1_CANDIDATE' || r.priority === 'A2_CANDIDATE'
+    ).length,
+    wait: rows.filter(r => r.priority === 'WAIT').length,
+    protected: rows.filter(r => r.priority === 'PROTECTED').length,
+    sbm: rows.filter(r => r.priority === 'SBM').length,
+    review: rows.filter(r =>
+      r.priority === 'REVIEW' || r.priority === 'DOCTOR_REVIEW' ||
+      r.priority === 'B_CANDIDATE' || r.priority === 'CANDIDATE'
+    ).length
+  };
+
+  sdsdWriteSiteSummary_(rows, result);
+  return true;
+}
+
+function sdsdRefreshCandidatesView_() {
+  const rows = sdsdCandidateRowsFromSheet_();
+  if (!rows.length) return false;
+  sdsdWriteCandidates_(rows);
+  return true;
 }
 
 function sdsdRefreshSelectedCasesView_() {

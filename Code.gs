@@ -29,6 +29,8 @@ function onOpen() {
     .addToUi();
 
   try { sdsdHideInternalSheets_(); } catch (e) {}
+  try { sdsdRefreshCandidatesView_(); } catch (e) {}
+  try { sdsdRefreshSelectedCasesView_(); } catch (e) {}
 }
 
 function sdsdInitialize() {
@@ -47,12 +49,19 @@ function sdsdImportHistoryHelp() {
 }
 
 function sdsdOpenSiteSummary() {
+  try { sdsdRefreshSiteSummaryFromCandidates_(); } catch (e) {}
   const sh = SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.summary);
   if (sh) SpreadsheetApp.getActive().setActiveSheet(sh);
 }
 
 function sdsdOpenCandidates() {
-  try { sdsdRefreshCandidatesView_(); } catch (e) {}
+  try {
+    sdsdRefreshCandidatesView_();
+  } catch (e) {
+    SpreadsheetApp.getUi().alert(
+      `診断候補の表示を更新できませんでした。\n\n${e.message || e}`
+    );
+  }
   const sh = SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.candidates);
   if (sh) SpreadsheetApp.getActive().setActiveSheet(sh);
 }
