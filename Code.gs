@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.4.0-RC9.3';
+const SDSD_VERSION = '0.4.0-RC9.3.1';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -175,6 +175,16 @@ function sdsdHomeGuide_(session,m,work,stored){
       reason:'Doctorへ依頼する段階は完了しています。返ってきた診断結果をDiagnosisへ戻す段階です。',
       path:'1. サイト全体を診断する → 横断診断：Doctor結果を登録',
       tone:'YELLOW'
+    };
+  }
+
+  const individualEligible=sdsdEligibleIndividualPrecisionCount_();
+  if(individualEligible>0){
+    return {
+      title:`優先記事${individualEligible}件をDoctorで詳しく診断します`,
+      reason:'Diagnosisが優先度・処置履歴・リスクを確認し、個別精密診断へ進める記事を自動判定しました。行を選択する必要はありません。',
+      path:'メニュー最上段 → ▶ 次に進む（Diagnosisに任せる）',
+      tone:'BLUE'
     };
   }
 
@@ -508,6 +518,40 @@ function sdsdDisplayTitle_(url, articleMap) {
   return master && master.title ? String(master.title) : '（タイトル未取得）';
 }
 
+function sdsdTitleFromUrlFallback_(url){
+  try{
+    const u=String(url||'').replace(/[?#].*$/,'').replace(/\/+$/,'');
+    const slug=decodeURIComponent(u.substring(u.lastIndexOf('/')+1)||'');
+    if(!slug)return '（タイトル未取得）';
+    return slug.replace(/[-_]+/g,' ').replace(/\s+/g,' ').trim();
+  }catch(e){
+    return '（タイトル未取得）';
+  }
+}
+
+function sdsdDisplayTitleSmart_(url, articleMap){
+  const fromMaster=sdsdDisplayTitle_(url,articleMap);
+  if(fromMaster && fromMaster!=='（タイトル未取得）')return fromMaster;
+
+  const cache=CacheService.getDocumentCache();
+  const key='SDSD_TITLE_'+Utilities.base64EncodeWebSafe(String(url||'')).slice(0,80);
+  try{
+    const cached=cache.get(key);
+    if(cached)return cached;
+  }catch(e){}
+
+  try{
+    const fetched=sdsdFetchArticleEvidence_(url);
+    const title=String((fetched&&fetched.title)||'').trim();
+    if(title){
+      try{cache.put(key,title,21600);}catch(e){}
+      return title;
+    }
+  }catch(e){}
+
+  return sdsdTitleFromUrlFallback_(url);
+}
+
 function sdsdPriorityJa_(priority) {
   const p = String(priority || '');
   if (p === 'A1_CANDIDATE') return '最優先';
@@ -677,7 +721,7 @@ function sdsdWriteSiteSummary_(rows, result) {
   let finding='サイト全体を一律に修正する状態ではありません。';
   if(top.length){
     const named=top.slice(0,2).map(r=>{
-      const title=sdsdDisplayTitle_(r.url,articleMap);
+      const title=sdsdDisplayTitleSmart_(r.url,articleMap);
       return `${title}（${r.url}）`;
     });
     finding+=` まず ${named.join('、')} を優先して原因を確認します。`;
@@ -694,7 +738,7 @@ function sdsdWriteSiteSummary_(rows, result) {
 
   if(top.length){
     const vals=top.map((r,i)=>{
-      const title=sdsdDisplayTitle_(r.url,articleMap);
+      const title=sdsdDisplayTitleSmart_(r.url,articleMap);
       return [
         i+1,
         `${title}\n${r.url}`,
@@ -1117,6 +1161,16 @@ function sdsdProceedIndividualPrecisionDiagnosis(){
   }
 }
 
+
+function sdsdEligibleIndividualPrecisionCount_(){
+  const rows=sdsdCandidateRowsFromSheet_();
+  return rows.filter(r =>
+    String(r.guard||'')==='PASS' &&
+    String(r.ownership||'')==='DOCTOR_OWNED' &&
+    (String(r.priority||'')==='A1_CANDIDATE' || String(r.priority||'')==='A2_CANDIDATE')
+  ).length;
+}
+
 function sdsdProceedNextGuided(){
   const ui=SpreadsheetApp.getUi();
   try{
@@ -1135,6 +1189,15 @@ function sdsdProceedNextGuided(){
 
     if(stage==='WAITING_INPUT'){
       sdsdRegisterSiteWideDoctorResult();
+      return;
+    }
+
+    // RC9.3.1: keep the guided action consistent with Site Diagnosis Detail.
+    // When A1/A2 individual precision candidates are currently eligible,
+    // they take precedence over stale/parallel site-wide additional-evidence state.
+    const individualEligible=sdsdEligibleIndividualPrecisionCount_();
+    if(individualEligible>0){
+      sdsdProceedIndividualPrecisionDiagnosis();
       return;
     }
 

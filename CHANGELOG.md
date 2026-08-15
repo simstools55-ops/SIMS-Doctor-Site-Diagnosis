@@ -1,3 +1,10 @@
+# v0.4.0-RC9.3.1
+
+- Fixed guided-route precedence: eligible A1/A2 individual precision candidates now take priority over stale/parallel site-wide additional-Evidence state.
+- Home guidance now matches Site Diagnosis Detail for individual precision candidates.
+- Added title fallback for Site Diagnosis Detail: Article Master -> live page title -> readable URL slug.
+- Users still do not select rows manually.
+
 # v0.4.0-RC9.3
 
 - Added top-level `▶ 次に進む（Diagnosisに任せる）`.
