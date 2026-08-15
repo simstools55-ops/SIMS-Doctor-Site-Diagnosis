@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.4.0-RC9.1';
+const SDSD_VERSION = '0.4.0-RC9.2';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -10,7 +10,7 @@ const SDSD_CONFIG = Object.freeze({
     evidencePageWeekly: '_SDSD_PAGE_WEEKLY',
     evidencePageQuery: '_SDSD_PAGE_QUERY_TOP',
     sbmHistory: '_SDSD_SBM_HISTORY',
-    summary: 'サイト診断サマリー',
+    summary: 'サイト診断詳細',
     candidates: '診断候補',
     selectedCases: '今回の診断対象',
     articleMaster: '_SDSD_ARTICLE_MASTER',
@@ -38,7 +38,7 @@ function onOpen() {
   const wholeSiteMenu = ui.createMenu('1. サイト全体を診断する')
     .addItem('Evidence Packageを読み込む', 'sdsdImportEvidencePackageZip')
     .addItem('サイト診断を実行', 'sdsdRunProductDiagnosis')
-    .addItem('診断結果を見る', 'sdsdOpenSiteSummary')
+    .addItem('サイト診断詳細を見る', 'sdsdOpenSiteSummary')
     .addItem('診断候補を見る', 'sdsdOpenCandidates')
     .addSeparator()
     .addItem('横断診断：改善機会を診断', 'sdsdRunSiteOpportunityDiagnosis')
@@ -406,7 +406,8 @@ function sdsdProductEnsureSheets_() {
 
   const legacyPairs = [
     ['Site Diagnosis Candidates', SDSD_CONFIG.sheets.candidates],
-    ['Selected Treatment Cases', SDSD_CONFIG.sheets.selectedCases]
+    ['Selected Treatment Cases', SDSD_CONFIG.sheets.selectedCases],
+    ['サイト診断サマリー', SDSD_CONFIG.sheets.summary]
   ];
   legacyPairs.forEach(pair => {
     const legacy = ss.getSheetByName(pair[0]);
@@ -579,160 +580,205 @@ function sdsdSiteMeaning_(row) {
   return '優先的に原因確認する代表記事';
 }
 
+function sdsdDetailSymptom_(r){
+  const t=String(r.weeklyTrend||'');
+  if(t==='SEVERE_DECLINE')return '直近で大きく悪化';
+  if(t==='TRAFFIC_DECLINE')return '検索流入が低下';
+  if(t==='RANKING_DECLINE')return '検索順位が低下';
+  if(t==='VOLATILE')return '検索推移が不安定';
+  if(t==='GROWTH')return '回復・成長傾向';
+  if(String(r.ownership||'')==='SBM_OWNED')return '順位に対してCTR改善余地';
+  if(String(r.evidenceConfidence||'')==='LOW')return 'データ不足で判定保留';
+  return '優先度スコアから要確認';
+}
+
+function sdsdDetailCause_(r){
+  const parts=[];
+  const t=String(r.weeklyTrend||'');
+  const own=String(r.ownership||'');
+  const ext=String(r.externalFactor||'');
+  if(own==='SBM_OWNED')parts.push('本文全体より、タイトル・スニペット側のCTR不足をまず確認');
+  if(t==='SEVERE_DECLINE'||t==='TRAFFIC_DECLINE')parts.push('表示回数・検索需要・主要クエリ順位のどこで落ちたかを切り分ける');
+  if(t==='RANKING_DECLINE')parts.push('主要クエリの順位低下と検索意図・競合変化を確認');
+  if(t==='VOLATILE')parts.push('短期変動の可能性があるため、週次推移を確認して過剰修正を避ける');
+  if(ext)parts.push('OS・サービス変更など外部要因の影響可能性を確認');
+  if(String(r.evidenceConfidence||'')==='LOW')parts.push('Evidence量が少ないため、追加データを確認してから判断');
+  if(String(r.treatmentRisk||'')==='HIGH')parts.push('変更リスクが高いため、全面改修前にDoctorで原因確定が必要');
+  return parts.length?parts.join('。'):'検索パフォーマンスと記事内容を精密診断して原因を特定する。';
+}
+
+function sdsdDetailNextAction_(r){
+  const p=String(r.priority||'');
+  const own=String(r.ownership||'');
+  const t=String(r.weeklyTrend||'');
+  if(p==='WAIT')return '現在は修正せず、SBMで経過観察を続ける。';
+  if(p==='PROTECTED'||t==='GROWTH')return '回復中のため大きく触らない。必要なら軽微な鮮度確認だけ行う。';
+  if(own==='SBM_OWNED'||p==='SBM')return 'SBMの日常改善へ回し、タイトル・meta descriptionなど入口改善を優先する。';
+  if(p==='REVIEW'||p==='DOCTOR_REVIEW'||p==='B_CANDIDATE'||p==='CANDIDATE')
+    return '追加Evidenceを確認し、Doctor精密診断へ進めるかをDiagnosisで再判定する。';
+  if(p==='A1_CANDIDATE'||p==='A2_CANDIDATE')
+    return 'Doctor精密診断Packageの対象にし、本文・主要クエリ・週次推移を確認して治療方針を確定する。';
+  return '診断候補画面で詳細を確認し、Homeの案内に従って次の処置へ進む。';
+}
+
+function sdsdDetailPriorityRows_(rows){
+  return rows.slice().sort((a,b)=>{
+    const pa=sdsdPriorityRank_(a.priority),pb=sdsdPriorityRank_(b.priority);
+    if(pa!==pb)return pa-pb;
+    return Number(b.tvs||0)-Number(a.tvs||0);
+  });
+}
+
 function sdsdWriteSiteSummary_(rows, result) {
-  const ss = SpreadsheetApp.getActive();
-  let sh = ss.getSheetByName(SDSD_CONFIG.sheets.summary);
-  if (!sh) sh = ss.insertSheet(SDSD_CONFIG.sheets.summary);
+  const ss=SpreadsheetApp.getActive();
+  let sh=ss.getSheetByName(SDSD_CONFIG.sheets.summary);
+  if(!sh)sh=ss.insertSheet(SDSD_CONFIG.sheets.summary);
   sh.clear();
 
-  const total = result.total || rows.length;
-  const a1 = rows.filter(r => r.priority === 'A1_CANDIDATE').length;
-  const a2 = rows.filter(r => r.priority === 'A2_CANDIDATE').length;
-  const priorityCount = a1 + a2;
-  const review = rows.filter(r =>
-    r.priority === 'DOCTOR_REVIEW' || r.priority === 'REVIEW' ||
-    r.priority === 'B_CANDIDATE' || r.priority === 'CANDIDATE'
-  ).length;
-  const sbm = rows.filter(r => r.priority === 'SBM').length;
-  const protectedCount = rows.filter(r => r.priority === 'PROTECTED').length;
-  const wait = rows.filter(r => r.priority === 'WAIT').length;
+  const total=result.total||rows.length;
+  const articleMap=sdsdArticleTitleMap_();
+  const priorityRows=sdsdDetailPriorityRows_(rows);
+  const top=priorityRows.filter(r =>
+    ['A1_CANDIDATE','A2_CANDIDATE','DOCTOR_REVIEW','REVIEW','B_CANDIDATE','CANDIDATE']
+      .indexOf(String(r.priority||''))>=0
+  ).slice(0,5);
 
-  const severe = rows.filter(r => r.weeklyTrend === 'SEVERE_DECLINE').length;
-  const traffic = rows.filter(r => r.weeklyTrend === 'TRAFFIC_DECLINE').length;
-  const ranking = rows.filter(r => r.weeklyTrend === 'RANKING_DECLINE').length;
-  const volatile = rows.filter(r => r.weeklyTrend === 'VOLATILE').length;
-  const growth = rows.filter(r => r.weeklyTrend === 'GROWTH').length;
-  const external = rows.filter(r => String(r.externalFactor || '') !== '').length;
+  const a1=rows.filter(r=>r.priority==='A1_CANDIDATE').length;
+  const a2=rows.filter(r=>r.priority==='A2_CANDIDATE').length;
+  const severe=rows.filter(r=>r.weeklyTrend==='SEVERE_DECLINE').length;
+  const traffic=rows.filter(r=>r.weeklyTrend==='TRAFFIC_DECLINE').length;
+  const ranking=rows.filter(r=>r.weeklyTrend==='RANKING_DECLINE').length;
+  const volatile=rows.filter(r=>r.weeklyTrend==='VOLATILE').length;
+  const growth=rows.filter(r=>r.weeklyTrend==='GROWTH').length;
+  const external=rows.filter(r=>String(r.externalFactor||'')!=='').length;
 
-  let selectedCount = 0;
-  let selectedUrls = {};
-  try {
-    const selected = ss.getSheetByName(SDSD_CONFIG.sheets.selectedCases);
-    if (selected && selected.getLastRow() >= 2) {
-      const vals = selected.getDataRange().getValues();
-      const hdr = vals[0].map(String);
-      const urlCol = hdr.indexOf('URL') >= 0 ? hdr.indexOf('URL') : hdr.indexOf('記事URL');
-      if (urlCol >= 0) {
-        vals.slice(1).forEach(r => {
-          const u = String(r[urlCol] || '').trim();
-          if (u) selectedUrls[u] = true;
-        });
-        selectedCount = Object.keys(selectedUrls).length;
-      }
-    }
-  } catch (e) {}
-
-  const priorityRows = rows.filter(r =>
-    r.priority === 'A1_CANDIDATE' || r.priority === 'A2_CANDIDATE'
+  sh.getRange('A1:F1').merge().setValue('サイト診断詳細');
+  sh.getRange('A2:F2').merge().setValue(
+    'Homeの概要をさらに掘り下げ、どの記事に何が起きていて、次に何を確認・処置するかを示します。'
   );
-  const notSelected = priorityRows.filter(r => !selectedUrls[String(r.url || '').trim()]);
-  const notSelectedCount = Math.max(priorityCount - selectedCount, 0);
 
-  let notSelectedReason = '';
-  if (notSelectedCount > 0) {
-    const guardCount = notSelected.filter(r =>
-      String(r.guard || '').toUpperCase() !== '' &&
-      String(r.guard || '').toUpperCase() !== 'PASS'
-    ).length;
-    const riskCount = notSelected.filter(r =>
-      String(r.treatmentRisk || '').toUpperCase() === 'HIGH'
-    ).length;
+  sh.getRange('A4:B10').setValues([
+    ['診断対象',`${total}記事`],
+    ['最優先',`${a1}記事`],
+    ['優先',`${a2}記事`],
+    ['直近で大きく悪化',`${severe}記事`],
+    ['検索流入低下',`${traffic}記事`],
+    ['検索順位低下',`${ranking}記事`],
+    ['外部要因の可能性',`${external}記事`]
+  ]);
 
-    if (guardCount > 0) {
-      notSelectedReason = `最終確認・保護条件により今回は見送り ${guardCount}記事`;
-    } else if (riskCount > 0) {
-      notSelectedReason = `処置リスクが高いため今回は見送り ${riskCount}記事`;
-    } else {
-      notSelectedReason = `Treatment Batchの選定上限・優先順位により今回は見送り ${notSelectedCount}記事`;
+  sh.getRange('D4:F4').merge().setValue('診断所見');
+  let finding='サイト全体を一律に修正する状態ではありません。';
+  if(top.length){
+    const named=top.slice(0,2).map(r=>{
+      const title=sdsdDisplayTitle_(r.url,articleMap);
+      return `${title}（${r.url}）`;
+    });
+    finding+=` まず ${named.join('、')} を優先して原因を確認します。`;
+    finding+=' 下の「優先して確認する記事」に、症状・原因候補・具体的な次の処置を示しています。';
+  }else{
+    finding+=' 現時点ではDoctor精密診断を急ぐ記事はありません。';
+  }
+  if(growth>0)finding+=` 回復・成長中の記事${growth}件は保護し、不要な修正を避けます。`;
+  sh.getRange('D5:F10').merge().setValue(finding);
+
+  sh.getRange('A12:F12').merge().setValue('優先して確認する記事');
+  const headers=['優先','記事','現在の症状','確認すべき原因','次に行うこと','根拠'];
+  sh.getRange(13,1,1,headers.length).setValues([headers]);
+
+  if(top.length){
+    const vals=top.map((r,i)=>{
+      const title=sdsdDisplayTitle_(r.url,articleMap);
+      return [
+        i+1,
+        `${title}\n${r.url}`,
+        sdsdDetailSymptom_(r),
+        sdsdDetailCause_(r),
+        sdsdDetailNextAction_(r),
+        `優先度:${sdsdPriorityJa_(r.priority)} / TVS:${Number(r.tvs||0).toFixed(1)} / Evidence:${r.evidenceConfidence||'-'} / Risk:${r.treatmentRisk||'-'}`
+      ];
+    });
+    sh.getRange(14,1,vals.length,headers.length).setValues(vals);
+  }else{
+    sh.getRange('A14:F15').merge().setValue('現在、優先して精密診断する記事はありません。Homeの「次に行うこと」を確認してください。');
+  }
+
+  const base=top.length?14+top.length+2:17;
+  sh.getRange(base,1,1,6).merge().setValue('症状別の詳しい見方');
+  const symptomRows=[
+    ['大きな悪化',`${severe}記事`,'表示回数・クリック・順位のどこが落ちたかを切り分け、急落時期と外部要因を確認する。'],
+    ['検索流入低下',`${traffic}記事`,'需要減少か順位低下かを分け、主要クエリの推移を確認する。'],
+    ['検索順位低下',`${ranking}記事`,'検索意図・競合・鮮度・記事役割のズレを精密診断で確認する。'],
+    ['推移が不安定',`${volatile}記事`,'短期変動なら修正を急がず、週次データで再確認する。'],
+    ['回復・成長',`${growth}記事`,'原則保護。大幅な構成変更は行わない。'],
+    ['外部要因候補',`${external}記事`,'OS・サービス仕様変更やアルゴリズム要因の可能性をDoctorで検証する。']
+  ];
+  sh.getRange(base+1,1,1,3).setValues([['症状','件数','具体的な確認・解決方針']]);
+  sh.getRange(base+2,1,symptomRows.length,3).setValues(symptomRows);
+
+  const noteRow=base+9;
+  sh.getRange(noteRow,1,1,6).merge().setValue('この詳細画面の役割');
+  sh.getRange(noteRow+1,1,2,6).merge().setValue(
+    'ここでは「どの記事を、なぜ、どう確認するか」を示します。最終的なリライト・Merge・新記事作成は、Doctorの精密診断で原因を確定してから決めます。Homeは全体状況と次の一手、この画面は原因分析と具体的な処置候補を確認する場所です。'
+  );
+
+  // Product styling
+  sh.getRange('A1:F1').setBackground('#185ABC').setFontColor('#FFFFFF').setFontWeight('bold').setFontSize(18);
+  sh.getRange('A2:F2').setBackground('#D2E3FC').setFontColor('#174EA6').setFontSize(11);
+  sh.getRange('A4:A10').setBackground('#F1F3F4').setFontWeight('bold').setFontColor('#5F6368');
+  sh.getRange('B4:B10').setBackground('#FFFFFF').setFontWeight('bold');
+  sh.getRange('D4:F4').setBackground('#D2E3FC').setFontColor('#174EA6').setFontWeight('bold');
+  sh.getRange('D5:F10').setBackground('#F8F9FA');
+  sh.getRange('A12:F12').setBackground('#D2E3FC').setFontColor('#174EA6').setFontWeight('bold');
+  sh.getRange(13,1,1,6).setBackground('#E8F0FE').setFontColor('#174EA6').setFontWeight('bold');
+
+  if(top.length){
+    for(let i=0;i<top.length;i++){
+      const row=14+i;
+      const tone=i<2?'#FEF7E0':'#FFFFFF';
+      sh.getRange(row,1,1,6).setBackground(tone);
+      sh.getRange(row,1).setFontWeight('bold').setHorizontalAlignment('center');
+      sh.getRange(row,2).setFontWeight('bold');
+      if(i<2)sh.getRange(row,1,1,2).setFontColor('#9A6700');
     }
   }
+  sh.getRange(base,1,1,6).setBackground('#D2E3FC').setFontColor('#174EA6').setFontWeight('bold');
+  sh.getRange(base+1,1,1,3).setBackground('#E8F0FE').setFontColor('#174EA6').setFontWeight('bold');
+  sh.getRange(noteRow,1,1,6).setBackground('#D2E3FC').setFontColor('#174EA6').setFontWeight('bold');
+  sh.getRange(noteRow+1,1,2,6).setBackground('#F8F9FA');
 
-  let overall = 'サイト全体を一律に修正する状態ではありません。';
-  if (priorityCount > 0) {
-    overall += ` 影響の大きい${priorityCount}記事を優先してDoctorで原因を確認します。`;
-  }
-  if (growth + protectedCount > 0) {
-    overall += ' 回復・成長中の記事は保護し、不要な修正を避けます。';
-  }
+  sh.setFrozenRows(2);
+  sh.setHiddenGridlines(true);
+  [70,360,180,430,430,300].forEach((w,i)=>sh.setColumnWidth(i+1,w));
+  sh.getRange(1,1,Math.max(sh.getLastRow(),1),6).setWrap(true).setVerticalAlignment('top');
+  sh.getRange(1,1,Math.max(sh.getLastRow(),1),6).setFontFamily('Arial');
+  sh.getRange(1,1,Math.max(sh.getLastRow(),1),6).setBorder(false,false,false,false,false,false);
+  sh.getRange('A4:B10').setBorder(true,true,true,true,true,true,'#DADCE0',SpreadsheetApp.BorderStyle.SOLID);
+  sh.getRange('D4:F10').setBorder(true,true,true,true,true,true,'#DADCE0',SpreadsheetApp.BorderStyle.SOLID);
+  sh.getRange(13,1,Math.max(top.length+1,2),6).setBorder(true,true,true,true,true,true,'#DADCE0',SpreadsheetApp.BorderStyle.SOLID);
 
-  const values = [
-    ['サイト診断サマリー', ''],
-    ['診断対象', `${total}記事`],
-    ['Doctor精密診断の優先候補', `${priorityCount}記事（最優先 ${a1} / 優先 ${a2}）`],
-    ['今回Doctorへ送る記事', selectedCount ? `${selectedCount}記事` : 'Treatment Batch作成前'],
-    ['今回送らない優先候補', selectedCount ? `${notSelectedCount}記事` : 'Treatment Batch作成前'],
-    ['今回送らない理由', selectedCount ? (notSelectedReason || 'なし') : 'Treatment Batch作成前'],
-    ['追加確認が必要', `${review}記事`],
-    ['SBMの日常改善向き', `${sbm}記事`],
-    ['回復・成長中などの保護対象', `${protectedCount}記事`],
-    ['最近処置済み・経過観察', `${wait}記事`],
-    ['', ''],
-    ['サイト全体の所見', overall],
-    ['', ''],
-    ['サイト全体の主な症状', ''],
-    ['直近で大きく悪化', `${severe}記事`],
-    ['検索流入低下', `${traffic}記事`],
-    ['検索順位低下', `${ranking}記事`],
-    ['推移が不安定', `${volatile}記事`],
-    ['回復・成長傾向', `${growth}記事`],
-    ['OS・サービス変更など外部要因の可能性', `${external}記事`],
-    ['', ''],
-    ['この診断の読み方', 'サイト全体を一律に修正するのではなく、優先候補をDoctorで精密診断し、共通原因と処置の必要性を確認します。'],
-    ['注意', 'この段階では改善率を断定しません。実際の処置はDoctorの精密診断後に決めます。'],
-    ['', ''],
-    ['優先度の見方', ''],
-    ['最優先', 'Doctorで詳しく診断する優先度が特に高い'],
-    ['優先', 'Doctorでの精密診断を推奨'],
-    ['要確認', '追加情報を確認してから判断'],
-    ['日常改善', 'DoctorではなくSBMの日常改善で対応'],
-    ['保護', '回復・成長中などのため今は大きく触らない'],
-    ['経過観察', '最近の処置後などのため、しばらく推移を見る'],
-    ['', ''],
-    ['Doctor Case Package', '未生成']
-  ];
-
-  sh.getRange(1,1,values.length,2).setValues(values);
-  sh.getRange('A1:B1').merge();
-  sh.getRange('A1').setValue('サイト診断サマリー');
-  sh.getRange('A1').setFontWeight('bold').setFontSize(14);
-  sh.getRange('A12').setFontWeight('bold');
-  sh.getRange('A14').setFontWeight('bold');
-  sh.getRange('A26').setFontWeight('bold');
-  sh.getRange(1,1,values.length,1).setFontWeight('bold');
-  sh.setColumnWidth(1, 250);
-  sh.setColumnWidth(2, 650);
-  sh.getRange(1,1,values.length,2).setWrap(true);
-  sh.setFrozenRows(1);
-
-  try { ss.setActiveSheet(sh); } catch (e) {}
+  try{ss.setActiveSheet(sh);}catch(e){}
 }
 
 function sdsdUpdateSummaryAfterBatch_(batch, guard) {
-  const sh = SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.summary);
-  if (!sh) return;
-  const values = sh.getRange(1,1,sh.getLastRow(),2).getValues();
-  for (let i=0; i<values.length; i++) {
-    if (String(values[i][0]) === '今回Doctorへ送る記事') {
-      sh.getRange(i+1,2).setValue(
-        `${batch.selectedCount}記事` +
-        (guard.blocked ? `（最終確認で保留 ${guard.blocked}）` : '')
-      );
-      return;
-    }
-  }
+  const sh=SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.summary);
+  if(!sh)return;
+  try{
+    sh.getRange('A3:F3').merge().setValue(
+      `Treatment Batch：Doctorへ送る ${batch.selectedCount}記事`+
+      (guard&&guard.blocked?` / 最終確認で保留 ${guard.blocked}記事`:'')
+    ).setBackground('#E6F4EA').setFontColor('#137333').setFontWeight('bold');
+  }catch(e){}
 }
 
 function sdsdUpdateSummaryAfterPackage_(caseCount, fileUrl) {
-  const sh = SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.summary);
-  if (!sh) return;
-  const values = sh.getRange(1,1,sh.getLastRow(),2).getValues();
-  for (let i=0; i<values.length; i++) {
-    if (String(values[i][0]) === 'Doctor Case Package') {
-      sh.getRange(i+1,2).setValue(`${caseCount}件生成済み`);
-      if (fileUrl) sh.getRange(i+1,2).setNote(fileUrl);
-      return;
-    }
-  }
+  const sh=SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.summary);
+  if(!sh)return;
+  try{
+    sh.getRange('A3:F3').merge().setValue(`Doctor Case Package：${caseCount}件生成済み`)
+      .setBackground('#E6F4EA').setFontColor('#137333').setFontWeight('bold');
+    if(fileUrl)sh.getRange('A3').setNote(fileUrl);
+  }catch(e){}
 }
 
 
@@ -936,7 +982,7 @@ function sdsdHideInternalSheets_() {
 function sdsdHideInternalSheets() {
   sdsdHideInternalSheets_();
   SpreadsheetApp.getUi().alert(
-    '内部処理用シートを非表示にしました。\n通常利用では「診断候補」と「選定案件」だけ確認すれば大丈夫です。'
+    '内部処理用シートを非表示にしました。\n通常利用ではHome・「サイト診断詳細」・「診断候補」を確認すれば大丈夫です。'
   );
 }
 
@@ -969,7 +1015,7 @@ function sdsdRunProductDiagnosis() {
       `Doctor精密診断の優先候補: ${result.priorityCandidates}件\n` +
       `回復・成長中のため保護: ${result.protected}件\n` +
       `SBMの日常改善対象: ${result.sbm}件\n\n` +
-      `「3. 診断結果を見る」でブログ全体の状態を確認してください。\n` +
+      `「サイト診断詳細を見る」で原因と具体的な確認手順を確認してください。\n` +
       `詳しい記事一覧は「4. 診断候補を見る」で確認できます。`
     );
   } catch (e) {

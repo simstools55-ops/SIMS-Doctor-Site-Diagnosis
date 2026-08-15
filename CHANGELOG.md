@@ -1,3 +1,12 @@
+# v0.4.0-RC9.2
+
+- Renamed `サイト診断サマリー` to `サイト診断詳細` with automatic sheet migration.
+- Rebuilt the detail view with product-style colors and sections.
+- Shows the actual highest-impact article titles and URLs instead of anonymous wording such as "影響の大きい2記事".
+- Adds per-article symptom, cause to investigate, exact next action, and evidence/risk basis.
+- Separates roles: Home = site overview / next action; Detail = causes / concrete diagnostic and treatment steps.
+- Updated menu wording to `サイト診断詳細を見る`.
+
 # v0.4.0-RC9.1
 
 - Rebuilt Diagnosis Home as a dynamic site-diagnosis dashboard.
