@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.4.0-RC9.3.1';
+const SDSD_VERSION = '0.4.0-RC9.3.2';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -60,7 +60,7 @@ function onOpen() {
     .addItem('現在の診断を終了', 'sdsdEndCurrentDiagnosisSession')
     .addSeparator()
     .addItem('初期設定を実行', 'sdsdInitialize')
-    .addItem('Article Masterの取込案内', 'sdsdArticleMasterImportHelp')
+    .addItem('Article Master（任意）の案内', 'sdsdArticleMasterImportHelp')
     .addItem('SBM改善履歴の取込案内', 'sdsdImportHistoryHelp')
     .addSeparator()
     .addItem('内部シートを表示', 'sdsdShowInternalSheets')
@@ -1096,22 +1096,8 @@ function sdsdProceedIndividualPrecisionDiagnosis(){
       return;
     }
 
-    sdsdProgress_(2,4,'記事管理データを確認しています');
+    sdsdProgress_(2,4,'記事識別情報を自動解決しています');
     const coverage=sdsdArticleMasterCoverageForSelected_();
-    if(coverage.withArticleId<coverage.selected){
-      try{sdsdRefreshSelectedCasesView_();}catch(e){}
-      ui.alert(
-        `精密診断の対象はDiagnosisが自動選定しました。\n\n` +
-        `対象: ${coverage.selected}記事\n` +
-        `ArticleID確認済み: ${coverage.withArticleId}記事\n\n` +
-        '精密診断Packageを作るため、今回のサイトのSBM「記事管理」データが必要です。\n\n' +
-        '次に行うこと:\n' +
-        '「その他・管理 → Article Masterの取込案内」に従って記事管理CSVを取り込んでください。\n\n' +
-        '取込後は、同じ「▶ 次に進む（Diagnosisに任せる）」をもう一度実行してください。'
-      );
-      try{sdsdRenderHome_();}catch(e){}
-      return;
-    }
 
     sdsdProgress_(3,4,'記事本文と主要クエリを準備しています');
     const enrichment=sdsdEnrichSelectedCases({silent:true,maxPerRun:3});
@@ -1150,8 +1136,9 @@ function sdsdProceedIndividualPrecisionDiagnosis(){
     ui.alert(
       `Doctor精密診断Packageを生成しました。\n\n` +
       `対象: ${exported.caseCount}記事\n` +
-      `ファイル: ${exported.fileName}\n\n` +
-      'Diagnosisが対象選定・本文取得・クエリ準備まで行いました。\n' +
+      `ファイル: ${exported.fileName}\n` +
+      `SBM ArticleID使用: ${exported.realArticleIdCount}件 / URL自動識別: ${exported.surrogateArticleIdCount}件\n\n` +
+      'Diagnosisが対象選定・記事識別・本文取得・クエリ準備まで行いました。\n' +
       'このPackageをSIMS Doctorへ渡してください。\n\n' +
       exported.fileUrl
     );
@@ -1270,80 +1257,9 @@ function sdsdCreateProductTreatmentBatch() {
 }
 
 function sdsdCreateProductCasePackage() {
-  try {
-    sdsdRefreshSelectedCasesView_();
-
-    const coverage = sdsdArticleMasterCoverageForSelected_();
-    if (coverage.selected === 0) {
-      SpreadsheetApp.getUi().alert(
-        'Doctor Case Packageを生成できません。\n\n今回の診断対象がありません。'
-      );
-      return;
-    }
-
-    if (coverage.withArticleId < coverage.selected) {
-      SpreadsheetApp.getUi().alert(
-        `Doctor Case Packageを生成する前に、今回のサイトの「記事管理」データが必要です。\n\n` +
-        `今回の診断対象: ${coverage.selected}件\n` +
-        `Article MasterでURL一致: ${coverage.matched}件\n` +
-        `ArticleIDまで確認できた記事: ${coverage.withArticleId}件\n\n` +
-        `「初期設定・データ準備 → Article Masterの取込案内」から、` +
-        `今回診断しているブログのSBM「記事管理」CSVを取り込んでください。\n\n` +
-        `取り込んだ後は前の処理をやり直さず、「▶ 次に進む（Diagnosisに任せる）」をもう一度実行できます。`
-      );
-      return;
-    }
-
-    sdsdProgress_(1, 3, 'Doctor Case Packageを準備しています');
-    const enrichment = sdsdEnrichSelectedCases({
-      silent: true,
-      maxPerRun: 3
-    });
-
-    sdsdRefreshSelectedCasesView_();
-
-    if (enrichment.review > 0) {
-      SpreadsheetApp.getUi().alert(
-        `Doctor Case Packageの準備中に要確認記事が見つかりました。\n\n` +
-        `準備完了: ${enrichment.ready}/${enrichment.total}件\n` +
-        `要確認: ${enrichment.review}件\n` +
-        `未処理: ${enrichment.pending}件\n\n` +
-        `「個別記事の精密診断 → 2. 選定記事を見る」で要確認案件を確認してください。`
-      );
-      return;
-    }
-
-    if (!enrichment.complete) {
-      SpreadsheetApp.getUi().alert(
-        `Doctor Case Packageを準備しています。\n\n` +
-        `準備完了: ${enrichment.ready}/${enrichment.total}件\n` +
-        `未処理: ${enrichment.pending}件\n\n` +
-        `今回の処理結果は保存しました。\n` +
-        `もう一度「▶ 次に進む（Diagnosisに任せる）」を実行すると、未処理の記事から続けます。`
-      );
-      return;
-    }
-
-    sdsdProgress_(2, 3, '全記事の準備完了。ZIPを生成しています');
-    const exported = sdsdExportDoctorCasePackageZip({silent:true});
-
-    sdsdUpdateSummaryAfterPackage_(exported.caseCount, exported.fileUrl);
-    sdsdRefreshSelectedCasesView_();
-    sdsdProgress_(3, 3, 'Doctor Case Packageを保存しました');
-
-    SpreadsheetApp.getUi().alert(
-      `Doctor Case Packageの生成が完了しました。\n\n` +
-      `案件数: ${exported.caseCount}件\n` +
-      `本文再取得: ${exported.refetched}件\n\n` +
-      `Google DriveにZIPを保存しました。\n${exported.fileUrl}\n\n` +
-      `このZIPをSIMS Doctorへ渡してください。`
-    );
-  } catch (e) {
-    SpreadsheetApp.getUi().alert(
-      `Doctor Case Packageを生成できませんでした。\n\n${e.message || e}`
-    );
-    throw e;
-  }
+  // Backward-compatible entry point. RC9.3.2 normal operation no longer
+  // requires a manually imported Article Master.
+  return sdsdProceedIndividualPrecisionDiagnosis();
 }
 
 // ============================================================================
@@ -1473,12 +1389,10 @@ function sdsdBuildArticleMasterMap_() {
 
 function sdsdArticleMasterImportHelp() {
   SpreadsheetApp.getUi().alert(
-    'Doctor Case Packageを作るには、今回診断しているブログのSBM「記事管理」データが必要です。\n\n' +
-    '1. SBMで「記事管理」シートをCSVとして保存します。\n' +
-    '2. Site Diagnosisの内部シート「_SDSD_ARTICLE_MASTER」へインポートします。\n' +
-    '3. Googleスプレッドシートの「ファイル → インポート → アップロード → 現在のシートを置換」を使用します。\n\n' +
-    'ArticleID・記事タイトル・URL・メインクエリをCase Packageへ利用します。\n' +
-    '別ブログの記事管理データではCase Packageを生成できません。'
+    'Article Masterは現在、精密診断Package生成の必須条件ではありません。\n\n' +
+    'DiagnosisはArticleIDが無い場合、記事URLから安定した内部IDを自動生成してDoctor診断まで進めます。\n' +
+    'SBMの記事管理データがすでにある場合は、本物のArticleID・記事タイトル・メインクエリを優先利用できます。\n\n' +
+    '通常運用では手動CSV取込は不要です。'
   );
 }
 
@@ -1550,6 +1464,26 @@ function sdsdShortHash_(text) {
     .map(b => ('0' + ((b + 256) % 256).toString(16)).slice(-2))
     .join('')
     .toUpperCase();
+}
+
+function sdsdSurrogateArticleId_(url) {
+  return `REF-${sdsdShortHash_(sdsdNormalizeUrl_(url))}`;
+}
+
+function sdsdResolveArticleIdentity_(master, url) {
+  const realId = master ? String(master.articleId || '').trim() : '';
+  if (realId) {
+    return {
+      articleId: realId,
+      source: 'SBM_ARTICLE_MASTER',
+      surrogate: false
+    };
+  }
+  return {
+    articleId: sdsdSurrogateArticleId_(url),
+    source: 'URL_SURROGATE',
+    surrogate: true
+  };
 }
 
 function sdsdCreateBatchId_() {
@@ -1658,10 +1592,6 @@ function sdsdEnrichSelectedCases(options) {
   const queryMap = sdsdBuildQueryEvidenceMap_();
   const querySourceCount = sdsdQueryEvidenceSourceCount_();
 
-  if (!Object.keys(articleMap).length) {
-    throw new Error('記事管理データがありません。_SDSD_ARTICLE_MASTERへSBM「記事管理」CSVを入れてください。');
-  }
-
   const extraHeaders = [
     'ArticleID','Article Title','Main Query','Article Fetch Status',
     'Case Package Status','Article Cache Key','Query Evidence Count'
@@ -1723,32 +1653,28 @@ function sdsdEnrichSelectedCases(options) {
     if (!url) continue;
 
     const master = articleMap[sdsdNormalizeUrl_(url)] || null;
-    const articleId = master ? master.articleId : '';
-    const title = master ? master.title : '';
-    const mainQuery = master ? master.mainQuery : '';
+    const identityInfo = sdsdResolveArticleIdentity_(master, url);
+    const articleId = identityInfo.articleId;
     const queryEvidence = (queryMap[sdsdNormalizeUrl_(url)] || []).slice(0,10);
 
-    // Missing identity/search prerequisites are cheap to detect; do not fetch the page.
-    if (!master || !articleId ||
-        (querySourceCount > 0 && queryEvidence.length === 0)) {
-      let reviewReason = 'NEEDS_REVIEW';
-      if (querySourceCount > 0 && queryEvidence.length === 0) {
-        reviewReason = 'QUERY_EVIDENCE_MISSING';
-      }
-
+    // Query evidence remains a true diagnostic prerequisite when Collector provided query data.
+    if (querySourceCount > 0 && queryEvidence.length === 0) {
       sh.getRange(r+1, col['ArticleID']+1).setValue(articleId);
-      sh.getRange(r+1, col['Article Title']+1).setValue(title);
-      sh.getRange(r+1, col['Main Query']+1).setValue(mainQuery);
-      sh.getRange(r+1, col['Query Evidence Count']+1).setValue(queryEvidence.length);
-      sh.getRange(r+1, col['Case Package Status']+1).setValue(reviewReason);
+      sh.getRange(r+1, col['Article Title']+1).setValue(master ? String(master.title || '') : '');
+      sh.getRange(r+1, col['Main Query']+1).setValue(master ? String(master.mainQuery || '') : '');
+      sh.getRange(r+1, col['Query Evidence Count']+1).setValue(0);
+      sh.getRange(r+1, col['Case Package Status']+1).setValue('QUERY_EVIDENCE_MISSING');
       sh.getRange(r+1, col['Referral Status']+1).setValue('NEEDS_CASE_ENRICHMENT_REVIEW');
-
       failed++;
       processedThisRun++;
       continue;
     }
 
     const fetched = sdsdFetchArticleEvidence_(url);
+    const title = (master && master.title) ? String(master.title) : String(fetched.title || '');
+    const mainQuery = (master && master.mainQuery)
+      ? String(master.mainQuery)
+      : String((queryEvidence[0] && queryEvidence[0].query) || '');
 
     sh.getRange(r+1, col['ArticleID']+1).setValue(articleId);
     sh.getRange(r+1, col['Article Title']+1).setValue(title || fetched.title);
@@ -1803,6 +1729,9 @@ function sdsdEnrichSelectedCases(options) {
     );
     referral.case_identity.site_id = siteId;
     referral.case_identity.article_id = articleId;
+    referral.case_identity.article_id_source = identityInfo.source;
+    referral.case_identity.article_id_is_surrogate = identityInfo.surrogate;
+    referral.case_identity.canonical_article_url = url;
     referral.case_identity.url = url;
     referral.case_identity.request_id = String(
       referral.case_identity.request_id ||
@@ -1810,13 +1739,15 @@ function sdsdEnrichSelectedCases(options) {
       sdsdBuildRequestId_(batchId, articleId)
     );
 
-    // RC4 Identity Contract: preserve canonical identifiers unchanged.
+    // Identity Contract: use SBM ArticleID when available; otherwise preserve stable URL-surrogate + canonical URL.
     referral.case_id = referral.case_identity.individual_case_id;
     referral.request_id = referral.case_identity.request_id;
     referral.site_diagnosis_case_id = referral.case_identity.site_diagnosis_case_id;
     referral.site_diagnosis_batch_id = batchId;
     referral.site_id = siteId;
     referral.article_id = articleId;
+    referral.article_id_source = identityInfo.source;
+    referral.article_id_is_surrogate = identityInfo.surrogate;
     referral.article_url = url;
 
     referral.article_evidence = {
@@ -1826,6 +1757,9 @@ function sdsdEnrichSelectedCases(options) {
       meta_description: fetched.metaDescription,
       canonical_url: fetched.canonicalUrl || url,
       main_query: mainQuery,
+      identity_note: identityInfo.surrogate
+        ? 'SBM ArticleID未取得。記事URLを正本としてDiagnosis内部IDを使用。SBM返却時はURL照合してください。'
+        : 'SBM ArticleID確認済み。',
       body_storage: cached ? 'DOCUMENT_CACHE' : 'REFETCH_ON_EXPORT',
       fetched_at: new Date().toISOString()
     };
@@ -1938,6 +1872,8 @@ function sdsdExportDoctorCasePackageZip(options) {
   const blobs = [];
   const manifestCases = [];
   let refetched = 0;
+  let realArticleIdCount = 0;
+  let surrogateArticleIdCount = 0;
 
   rows.forEach((r,i) => {
     const articleId = String(r[idx['ArticleID']] || `CASE-${i+1}`);
@@ -1984,6 +1920,9 @@ function sdsdExportDoctorCasePackageZip(options) {
     ));
 
     const identity = parsed.case_identity || {};
+    const isSurrogate = Boolean(identity.article_id_is_surrogate) || /^REF-/.test(articleId);
+    if (isSurrogate) surrogateArticleIdCount++;
+    else realArticleIdCount++;
     const requestId = String(parsed.request_id || identity.request_id || '');
     if (!identity.site_diagnosis_case_id || !identity.individual_case_id || !identity.site_id || !requestId) {
       throw new Error(`Case Identityが不完全です: ${articleId}`);
@@ -1996,6 +1935,9 @@ function sdsdExportDoctorCasePackageZip(options) {
       individual_case_id: String(identity.individual_case_id),
       site_id: String(identity.site_id),
       article_id: articleId,
+      article_id_source: String(identity.article_id_source || (isSurrogate ? 'URL_SURROGATE' : 'SBM_ARTICLE_MASTER')),
+      article_id_is_surrogate: isSurrogate,
+      canonical_article_url: url,
       url: url,
       priority: String(r[idx['Site Priority']] || ''),
       tvs: Number(r[idx['TVS']] || 0),
@@ -2043,14 +1985,17 @@ function sdsdExportDoctorCasePackageZip(options) {
     refetched: refetched,
     fileUrl: file.getUrl(),
     fileId: file.getId(),
-    fileName: file.getName()
+    fileName: file.getName(),
+    realArticleIdCount: realArticleIdCount,
+    surrogateArticleIdCount: surrogateArticleIdCount
   };
 
   if (!options.silent) {
     SpreadsheetApp.getUi().alert(
       `Doctor Case Packageの生成が完了しました。\n\n` +
       `案件数: ${result.caseCount}件\n` +
-      `本文再取得: ${result.refetched}件\n\n` +
+      `本文再取得: ${result.refetched}件\n` +
+      `SBM ArticleID使用: ${result.realArticleIdCount}件 / URL自動識別: ${result.surrogateArticleIdCount}件\n\n` +
       `Google Driveに保存しました。\n${result.fileUrl}`
     );
   }

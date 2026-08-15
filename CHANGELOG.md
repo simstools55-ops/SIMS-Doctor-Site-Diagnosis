@@ -1,3 +1,15 @@
+# v0.4.0-RC9.3.2
+
+- Removed manual Article Master CSV import as a prerequisite for individual Doctor precision packages.
+- Article identity resolution is now automatic:
+  1. Use real SBM ArticleID when available.
+  2. Otherwise generate stable `REF-{URL hash}` internal ID.
+- Canonical article URL is always retained as the authoritative fallback identity.
+- Page title is fetched from the live article when Article Master title is unavailable.
+- Main query falls back to the top query in Collector Evidence.
+- Doctor package explicitly records whether ArticleID is real or URL-surrogate.
+- SBM handoff can resolve surrogate cases by canonical URL.
+
 # v0.4.0-RC9.3.1
 
 - Fixed guided-route precedence: eligible A1/A2 individual precision candidates now take priority over stale/parallel site-wide additional-Evidence state.
