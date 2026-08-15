@@ -1,3 +1,10 @@
+# v0.4.0-RC6 Single-Code
+
+- RC5-HF-SITE-WIDE-PRECISION-RESULT の現行31個の `.gs` を `Code.gs` 1本へ統合。
+- 診断ロジックの機能変更は行わず、更新・配布時の差し替え対象削減を目的とした構成整理。
+- `appsscript.json` は変更なし。
+- RC5系からの初回移行時は旧分割 `.gs` を削除してから適用する。
+
 # Changelog
 
 ## v0.4.0-RC5 - Product UX
