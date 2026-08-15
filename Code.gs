@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.5.4';
+const SDSD_VERSION = '0.5.5';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -1415,15 +1415,33 @@ function sdsdMergePrecisionIntoStoredResult_(precisionNormalized) {
     return fallback;
   }
 
+  const normalizedText = v => String(v || '').trim().toLowerCase();
+  const normalizedUrl = v => normalizedText(v).replace(/\/+$/, '');
   const resolvedSourceIds = {};
   const resolvedCaseIds = {};
+  const resolvedUrls = {};
+  const resolvedThemes = {};
+
   (precisionNormalized.diagnosis_cases || []).forEach(c => {
     const caseId = String(c.diagnosis_case_id || '');
     if (caseId) resolvedCaseIds[caseId] = true;
+
     (c.absorbed_source_case_ids || []).forEach(id => {
       const sourceId = String(id || '');
       if (sourceId) resolvedSourceIds[sourceId] = true;
     });
+
+    const urls = [];
+    if (c.article_url) urls.push(c.article_url);
+    if (Array.isArray(c.articles)) {
+      c.articles.forEach(a => {
+        if (a && a.article_url) urls.push(a.article_url);
+      });
+    }
+    urls.map(normalizedUrl).filter(Boolean).forEach(url => { resolvedUrls[url] = true; });
+
+    const theme = normalizedText(c.diagnosis_theme);
+    if (theme) resolvedThemes[theme] = true;
   });
 
   const remaining = current.diagnosis_cases.filter(c => {
@@ -1433,8 +1451,32 @@ function sdsdMergePrecisionIntoStoredResult_(precisionNormalized) {
     const absorbed = Array.isArray(c.absorbed_source_case_ids)
       ? c.absorbed_source_case_ids.map(String)
       : [];
-    const overlapsResolvedSource = absorbed.some(id => resolvedSourceIds[id]);
-    return !overlapsResolvedSource;
+    if (absorbed.some(id => resolvedSourceIds[id])) return false;
+
+    // Precision packages can contain legacy/source cases whose IDs are not
+    // returned by Doctor. For unresolved NEEDS_EVIDENCE cases only, safely
+    // match the finalized result by exact article URL first, then exact theme.
+    const route = String(c.route_to || c.doctor_decision || '').toUpperCase();
+    const isNeedsEvidence =
+      route === 'NEEDS_EVIDENCE' ||
+      route === 'ADDITIONAL_EVIDENCE_REQUIRED';
+
+    if (isNeedsEvidence) {
+      const urls = [];
+      if (c.article_url) urls.push(c.article_url);
+      if (Array.isArray(c.articles)) {
+        c.articles.forEach(a => {
+          if (a && a.article_url) urls.push(a.article_url);
+        });
+      }
+      const urlMatched = urls.map(normalizedUrl).filter(Boolean).some(url => resolvedUrls[url]);
+      if (urlMatched) return false;
+
+      const theme = normalizedText(c.diagnosis_theme);
+      if (theme && resolvedThemes[theme]) return false;
+    }
+
+    return true;
   });
 
   const merged = JSON.parse(JSON.stringify(current));

@@ -1,4 +1,4 @@
-# SIMS Doctor Site Diagnosis v0.5.4
+# SIMS Doctor Site Diagnosis v0.5.5
 
 SIMS Doctor Site Diagnosis は、Collectorで収集したEvidenceを読み込み、サイト全体の診断、個別精密診断、横断診断、Doctorへの引き渡しまでを案内する診断ワークスペースです。
 
@@ -50,6 +50,14 @@ Site Diagnosisは、1つのスプレッドシートで1サイトずつ診断す�
 `その他・管理 → 手動・保守操作`
 
 から個別処理を実行できます。
+
+## v0.5.5の主な変更
+
+- 精密診断結果の統合時、元の `NEEDS_EVIDENCE` 案件を case ID だけでなく記事URLでも照合して置換
+- URLが取れない場合のみ診断テーマの完全一致を安全なフォールバックとして使用
+- 確定済みPrecision案件と元の追加Evidence案件がサイト治療計画へ二重表示される問題を修正
+- 照合対象は未確定の `NEEDS_EVIDENCE` 案件に限定し、既存のWriter/Merge/NO_ACTION案件を誤削除しない
+- v0.5.4の結果取込優先、Package重複生成防止、残案件保持、ZIPファイル名表示を維持
 
 ## v0.5.4の主な変更
 

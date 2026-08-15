@@ -1,3 +1,11 @@
+# v0.5.5
+
+- Fixes duplicate treatment-plan rows after the final site-wide precision batch.
+- Replaces unresolved NEEDS_EVIDENCE source cases by exact article URL when Doctor precision results omit the original case IDs.
+- Uses exact diagnosis-theme matching only as a fallback when URL matching is unavailable.
+- Restricts fallback removal to unresolved NEEDS_EVIDENCE cases to protect already finalized treatment cases.
+- Preserves all v0.5.4 precision import and package-state behavior.
+
 # v0.5.4
 
 - Prioritizes a valid pasted Doctor site-wide/precision result over generating another package.
