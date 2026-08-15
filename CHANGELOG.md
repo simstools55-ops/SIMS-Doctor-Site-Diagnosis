@@ -1,3 +1,13 @@
+# v0.4.0-RC9.3
+
+- Added top-level `▶ 次に進む（Diagnosisに任せる）`.
+- Diagnosis now automatically chooses the next workflow when user judgment is unnecessary.
+- Individual precision diagnosis automatically creates the Treatment Batch and selects eligible A1/A2 articles.
+- The same guided action continues through Article Master check, case enrichment, and Doctor Package generation.
+- If Apps Script execution is split, pressing the same guided action resumes from the saved state.
+- User action is requested only for missing prerequisites or genuine review cases.
+- Site Diagnosis Detail now tells users to use the guided next action instead of selecting rows manually.
+
 # v0.4.0-RC9.2
 
 - Renamed `サイト診断サマリー` to `サイト診断詳細` with automatic sheet migration.
