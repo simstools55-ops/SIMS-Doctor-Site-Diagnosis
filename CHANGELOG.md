@@ -1,3 +1,15 @@
+# v0.5.4
+
+- Prioritizes a valid pasted Doctor site-wide/precision result over generating another package.
+- Adds `WAITING_DOCTOR_RESULT` state for site-wide precision packages to prevent duplicate ZIP generation.
+- Supports direct `clusters[].route_to` and `clusters[].articles` in `SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1`.
+- Merges finalized precision clusters back into the stored site-wide diagnosis while preserving unresolved `NEEDS_EVIDENCE` cases.
+- Uses absorbed source-case overlap as a safe fallback when replacing previously consolidated precision clusters.
+- Renames the Doctor result import heading to clarify that the sheet is shared by site-wide and precision results.
+- Migrates the import-sheet wording without clearing an already pasted Doctor result.
+- Displays the generated precision ZIP filename in the completion dialog.
+- Preserves v0.5.3 diagnosis/scoring logic, maximum five precision clusters per package, individual Doctor-to-SBM handoff, and Home version display.
+
 # v0.5.3
 
 - Unified Home/additional-Evidence counts and precision-package selection around the same `route_to = NEEDS_EVIDENCE` predicate.

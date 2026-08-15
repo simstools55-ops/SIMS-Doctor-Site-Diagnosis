@@ -1,4 +1,4 @@
-# SIMS Doctor Site Diagnosis v0.5.3
+# SIMS Doctor Site Diagnosis v0.5.4
 
 SIMS Doctor Site Diagnosis は、Collectorで収集したEvidenceを読み込み、サイト全体の診断、個別精密診断、横断診断、Doctorへの引き渡しまでを案内する診断ワークスペースです。
 
@@ -51,17 +51,19 @@ Site Diagnosisは、1つのスプレッドシートで1サイトずつ診断す�
 
 から個別処理を実行できます。
 
-## v0.5.3の主な変更
+## v0.5.4の主な変更
 
-- Homeの「詳しい診断が必要」件数と追加Evidence精密診断Packageの選定条件を統一
-- `route_to = NEEDS_EVIDENCE` の案件を共通判定として扱い、古い `doctor_decision = ADDITIONAL_EVIDENCE_REQUIRED` 固定条件を廃止
-- 追加Evidence精密診断Packageは従来どおり最大5クラスタまで
-- 対象0件時はHomeを更新し、古い件数表示との矛盾を残さない
-- v0.5.2のDoctor→SBM引き渡し、再選定防止、Homeバージョン表示を維持
-- 診断アルゴリズム、Treatment判定、`maxPerRun = 3`、分割・再開方式は変更なし
+- Doctor結果取込に有効な横断／精密診断JSONがある場合、Package生成より結果登録を最優先
+- サイト横断精密診断Package生成後は結果待ち状態を保持し、同じPackageの重複生成を防止
+- `SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1` の直接 `clusters[].route_to` / `clusters[].articles` 形式に対応
+- Precision Resultの確定クラスタを元の横断診断結果へ差し戻し、未診断の `NEEDS_EVIDENCE` 案件を残す
+- Doctor結果取込シートを「横断診断／精密診断 共通」と明示し、貼り付け済み結果を消さない移行方式に変更
+- 精密診断Package生成完了ダイアログにZIPファイル名を表示
+- v0.5.3までのDoctor→SBM引き渡し、再選定防止、Homeバージョン表示、最大5クラスタ制限を維持
+- 保存先フォルダー指定はCollector方式を確認してから別リリースで対応
 
 ## 更新時に置き換えるファイル
 
 既存のApps Script環境では、今回コード変更があるのは `Code.gs` です。
 
-配布物の `VERSION`、`README-FIRST.md`、`CHANGELOG.md` もv0.5.3へ更新されています。`appsscript.json` と `SITE-WIDE-RESULT-CONTRACT-V1.md` は内容変更なしです。
+配布物の `VERSION`、`README-FIRST.md`、`CHANGELOG.md` もv0.5.4へ更新されています。`appsscript.json` と `SITE-WIDE-RESULT-CONTRACT-V1.md` は内容変更なしです。

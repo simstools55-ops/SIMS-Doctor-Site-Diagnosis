@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.5.3';
+const SDSD_VERSION = '0.5.4';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -184,6 +184,16 @@ function sdsdHomeGuide_(session,m,work,stored){
       title:'Doctor結果をSIMS-Blog-Managerへ登録してください',
       reason:'個別精密診断Packageは生成済みです。Doctorから返った各記事の診断結果はSBMへ登録し、完了後にDiagnosisへ引き渡し完了を記録します。',
       path:'メニュー最上段 → ▶ 次に進む（Diagnosisに任せる）',
+      tone:'YELLOW'
+    };
+  }
+
+  const precisionPackage=sdsdGetSiteWidePrecisionPackageState_();
+  if(precisionPackage.status==='WAITING_DOCTOR_RESULT'){
+    return {
+      title:'サイト横断の精密診断結果を待っています',
+      reason:'追加Evidence精密診断Packageは生成済みです。Doctorから結果が返ったら「Doctor結果取込」へ貼り付けてください。',
+      path:'Doctor結果取込へ貼り付け → メニュー最上段 → ▶ 次に進む（Diagnosisに任せる）',
       tone:'YELLOW'
     };
   }
@@ -1331,6 +1341,111 @@ function sdsdEligibleIndividualPrecisionCount_(){
   ).length;
 }
 
+function sdsdPendingDoctorResultImport_() {
+  try {
+    const text = sdsdReadSiteWideResultImportText_();
+    if (!text) return null;
+    const parsed = sdsdExtractJsonObject_(text);
+    if (!parsed) return null;
+    if (
+      parsed.format === 'SIMS_DOCTOR_SITE_WIDE_RESULT_V1' ||
+      parsed.format === 'SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1'
+    ) {
+      sdsdValidateSiteWideResult_(parsed);
+      return parsed;
+    }
+  } catch (e) {}
+  return null;
+}
+
+function sdsdSetSiteWidePrecisionPackageState_(state) {
+  const props = PropertiesService.getDocumentProperties();
+  const obj = state || {};
+  props.setProperty('SDSD_SITE_WIDE_PRECISION_PACKAGE_STATUS', String(obj.status || ''));
+  props.setProperty('SDSD_SITE_WIDE_PRECISION_PACKAGE_FILE_ID', String(obj.fileId || ''));
+  props.setProperty('SDSD_SITE_WIDE_PRECISION_PACKAGE_FILE_URL', String(obj.fileUrl || ''));
+  props.setProperty('SDSD_SITE_WIDE_PRECISION_PACKAGE_FILE_NAME', String(obj.fileName || ''));
+  props.setProperty('SDSD_SITE_WIDE_PRECISION_PACKAGE_CLUSTER_COUNT', String(obj.clusterCount || 0));
+  props.setProperty('SDSD_SITE_WIDE_PRECISION_PACKAGE_AT', new Date().toISOString());
+}
+
+function sdsdGetSiteWidePrecisionPackageState_() {
+  const props = PropertiesService.getDocumentProperties();
+  return {
+    status: String(props.getProperty('SDSD_SITE_WIDE_PRECISION_PACKAGE_STATUS') || ''),
+    fileId: String(props.getProperty('SDSD_SITE_WIDE_PRECISION_PACKAGE_FILE_ID') || ''),
+    fileUrl: String(props.getProperty('SDSD_SITE_WIDE_PRECISION_PACKAGE_FILE_URL') || ''),
+    fileName: String(props.getProperty('SDSD_SITE_WIDE_PRECISION_PACKAGE_FILE_NAME') || ''),
+    clusterCount: Number(props.getProperty('SDSD_SITE_WIDE_PRECISION_PACKAGE_CLUSTER_COUNT') || 0),
+    at: String(props.getProperty('SDSD_SITE_WIDE_PRECISION_PACKAGE_AT') || '')
+  };
+}
+
+function sdsdClearSiteWidePrecisionPackageState_() {
+  const props = PropertiesService.getDocumentProperties();
+  [
+    'SDSD_SITE_WIDE_PRECISION_PACKAGE_STATUS',
+    'SDSD_SITE_WIDE_PRECISION_PACKAGE_FILE_ID',
+    'SDSD_SITE_WIDE_PRECISION_PACKAGE_FILE_URL',
+    'SDSD_SITE_WIDE_PRECISION_PACKAGE_FILE_NAME',
+    'SDSD_SITE_WIDE_PRECISION_PACKAGE_CLUSTER_COUNT',
+    'SDSD_SITE_WIDE_PRECISION_PACKAGE_AT'
+  ].forEach(k => props.deleteProperty(k));
+}
+
+function sdsdShowSiteWidePrecisionResultWaiting_() {
+  const state = sdsdGetSiteWidePrecisionPackageState_();
+  const fileLine = state.fileName ? `\n生成済みZIP: ${state.fileName}` : '';
+  SpreadsheetApp.getUi().alert(
+    'サイト横断の精密診断結果を待っています。\n\n' +
+    '精密診断Packageは生成済みです。再生成する必要はありません。' +
+    fileLine + '\n\n' +
+    'SIMS Doctorから結果が返ったら「Doctor結果取込」シートへ貼り付け、' +
+    '「▶ 次に進む（Diagnosisに任せる）」を実行してください。'
+  );
+}
+
+function sdsdMergePrecisionIntoStoredResult_(precisionNormalized) {
+  let current = null;
+  try { current = sdsdReadStoredSiteWideResult_(); } catch (e) { current = null; }
+
+  if (!current || !Array.isArray(current.diagnosis_cases)) {
+    const fallback = JSON.parse(JSON.stringify(precisionNormalized));
+    fallback.format = 'SIMS_DOCTOR_SITE_WIDE_RESULT_V1';
+    return fallback;
+  }
+
+  const resolvedSourceIds = {};
+  const resolvedCaseIds = {};
+  (precisionNormalized.diagnosis_cases || []).forEach(c => {
+    const caseId = String(c.diagnosis_case_id || '');
+    if (caseId) resolvedCaseIds[caseId] = true;
+    (c.absorbed_source_case_ids || []).forEach(id => {
+      const sourceId = String(id || '');
+      if (sourceId) resolvedSourceIds[sourceId] = true;
+    });
+  });
+
+  const remaining = current.diagnosis_cases.filter(c => {
+    const id = String(c.diagnosis_case_id || '');
+    if (resolvedCaseIds[id] || resolvedSourceIds[id]) return false;
+
+    const absorbed = Array.isArray(c.absorbed_source_case_ids)
+      ? c.absorbed_source_case_ids.map(String)
+      : [];
+    const overlapsResolvedSource = absorbed.some(id => resolvedSourceIds[id]);
+    return !overlapsResolvedSource;
+  });
+
+  const merged = JSON.parse(JSON.stringify(current));
+  merged.format = 'SIMS_DOCTOR_SITE_WIDE_RESULT_V1';
+  merged.generated_at = new Date().toISOString();
+  merged.diagnosis_cases = remaining.concat(precisionNormalized.diagnosis_cases || []);
+  merged.last_precision_result_at = new Date().toISOString();
+  merged.last_precision_result_count = (precisionNormalized.diagnosis_cases || []).length;
+  return merged;
+}
+
 function sdsdProceedNextGuided(){
   const ui=SpreadsheetApp.getUi();
   try{
@@ -1347,8 +1462,21 @@ function sdsdProceedNextGuided(){
       return;
     }
 
+    // A pasted Doctor result always takes precedence over generating another package.
+    const pendingDoctorResult=sdsdPendingDoctorResultImport_();
+    if(pendingDoctorResult){
+      sdsdRegisterSiteWideDoctorResult();
+      return;
+    }
+
     if(stage==='WAITING_INPUT'){
       sdsdRegisterSiteWideDoctorResult();
+      return;
+    }
+
+    const precisionPackage=sdsdGetSiteWidePrecisionPackageState_();
+    if(precisionPackage.status==='WAITING_DOCTOR_RESULT'){
+      sdsdShowSiteWidePrecisionResultWaiting_();
       return;
     }
 
@@ -2472,6 +2600,12 @@ const SDSD_SESSION_PROP_KEYS_ = Object.freeze([
   'SDSD_INDIVIDUAL_DOCTOR_PACKAGE_FILE_URL',
   'SDSD_INDIVIDUAL_DOCTOR_PACKAGE_BATCH_ID',
   'SDSD_INDIVIDUAL_DOCTOR_PACKAGE_STATUS',
+  'SDSD_SITE_WIDE_PRECISION_PACKAGE_STATUS',
+  'SDSD_SITE_WIDE_PRECISION_PACKAGE_FILE_ID',
+  'SDSD_SITE_WIDE_PRECISION_PACKAGE_FILE_URL',
+  'SDSD_SITE_WIDE_PRECISION_PACKAGE_FILE_NAME',
+  'SDSD_SITE_WIDE_PRECISION_PACKAGE_CLUSTER_COUNT',
+  'SDSD_SITE_WIDE_PRECISION_PACKAGE_AT',
   'SDSD_SITE_WIDE_REGISTER_STAGE',
   'SDSD_SITE_WIDE_REGISTER_DETAIL',
   'SDSD_SITE_WIDE_REGISTER_AT'
@@ -5025,7 +5159,7 @@ function sdsdCreateMergeReferralFromSelectedTreatment() {
 function sdsdReadStoredSiteWideResult_() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.siteWideResult);
   if (!sh || !sh.getRange('A1').getValue()) {
-    throw new Error('Doctor横断診断結果が登録されていません。先に「サイト横断の診断・治療 → 5. Doctor診断結果を登録」を実行してください。');
+    throw new Error('Doctor診断結果が登録されていません。「Doctor結果取込」へ結果を貼り付け、「▶ 次に進む（Diagnosisに任せる）」を実行してください。');
   }
   const raw = String(sh.getRange('A1').getValue() || '');
   const obj = JSON.parse(raw);
@@ -5252,9 +5386,18 @@ function sdsdExportPriorityPrecisionClusterPackage() {
 
     const file = DriveApp.createFile(Utilities.zip(blobs, zipName));
 
+    sdsdSetSiteWidePrecisionPackageState_({
+      status:'WAITING_DOCTOR_RESULT',
+      fileId:file.getId(),
+      fileUrl:file.getUrl(),
+      fileName:zipName,
+      clusterCount:cases.length
+    });
+
     ui.alert(
       `サイト横断の精密診断Packageを生成しました。\n\n` +
       `優先クラスタ: ${cases.length}件\n` +
+      `ZIPファイル: ${zipName}\n` +
       `保存先: Google Drive\n\n` +
       `${file.getUrl()}\n\n` +
       `このZIPをSIMS Doctorへ渡してください。`
@@ -5263,7 +5406,8 @@ function sdsdExportPriorityPrecisionClusterPackage() {
     return {
       clusterCount: cases.length,
       fileId: file.getId(),
-      fileUrl: file.getUrl()
+      fileUrl: file.getUrl(),
+      fileName: zipName
     };
 
   } catch(e) {
@@ -5480,6 +5624,7 @@ function sdsdPrecisionArticles_(group, cluster) {
   const src = group || {};
   const list = src.articles || src.target_articles || [];
   if (Array.isArray(list) && list.length) return list;
+  if (Array.isArray(cluster.articles) && cluster.articles.length) return cluster.articles;
   return Array.isArray(cluster.target_articles) ? cluster.target_articles : [];
 }
 
@@ -5551,14 +5696,12 @@ function sdsdConvertPrecisionResult_(obj) {
       );
       const summary = String(
         g.reason || g.rationale || g.diagnosis_summary ||
-        cr.diagnosis_summary || cluster.diagnosis_summary || ''
+        cr.diagnosis_summary || cluster.diagnosis_summary || cluster.reason || ''
       );
 
       const mergePlan = g.merge_plan || cr.merge_plan || cluster.merge_plan || null;
       let targetArticles = sdsdPrecisionArticles_(g, cluster);
 
-      // Precision MERGE results often provide article identities only inside merge_plan.
-      // Preserve that authoritative direction instead of leaving target_articles blank.
       if (route === 'MERGE' && mergePlan) {
         const mergeArticles = sdsdMergePlanArticles_(mergePlan);
         if (mergeArticles.length) targetArticles = mergeArticles;
@@ -5568,24 +5711,41 @@ function sdsdConvertPrecisionResult_(obj) {
         ? sdsdMergePlanText_(mergePlan)
         : {survivor:'',absorbed:'',direction:'',content_to_absorb:''};
 
+      const treatmentPlan =
+        g.treatment_plan || cr.treatment_plan || cluster.treatment_plan || null;
+
       out.push({
         diagnosis_case_id: caseId,
         parent_diagnosis_case_id: baseId,
         diagnosis_theme: groupLabel ? `${diagnosisTheme} / ${groupLabel}` : diagnosisTheme,
-        diagnosis_type: String(g.group_type || cluster.diagnosis_type || cluster.improvement_type || ''),
+        diagnosis_type: String(
+          g.group_type || cluster.diagnosis_type || cluster.improvement_type || ''
+        ),
         absorbed_source_case_ids: Array.isArray(cluster.absorbed_source_case_ids)
           ? cluster.absorbed_source_case_ids.map(String) : [],
         target_articles: targetArticles,
-        doctor_decision: String(g.doctor_decision || g.decision || cr.doctor_decision || route),
+        doctor_decision: String(
+          g.doctor_decision || g.decision || cr.doctor_decision ||
+          cluster.doctor_decision || route
+        ),
         confidence: String(g.confidence || cr.confidence || cluster.confidence || ''),
         site_impact: String(g.site_impact || cr.site_impact || cluster.site_impact || ''),
-        treatment_strategy: String(g.treatment_strategy || cr.treatment_strategy || ''),
+        treatment_strategy: String(
+          g.treatment_strategy || cr.treatment_strategy || cluster.treatment_strategy || ''
+        ),
         route_to: route,
-        eventual_route: '',
+        eventual_route: String(
+          g.eventual_route || cr.eventual_route || cluster.eventual_route || ''
+        ),
         reason: summary,
         additional_evidence_needed: Array.isArray(g.additional_evidence_needed)
-          ? g.additional_evidence_needed.map(String) : [],
+          ? g.additional_evidence_needed.map(String)
+          : (Array.isArray(cluster.additional_evidence_needed)
+            ? cluster.additional_evidence_needed.map(String) : []),
         precision_group_type: groupLabel,
+        treatment_plan: treatmentPlan,
+        internal_link_recommendations: Array.isArray(cluster.internal_link_recommendations)
+          ? cluster.internal_link_recommendations : [],
         merge_plan: mergePlan || null,
         merge_survivor: mergeText.survivor,
         merge_absorbed: mergeText.absorbed,
@@ -5706,6 +5866,9 @@ function sdsdNormalizeDoctorSiteWideResult_(obj) {
       reason: String(c.reason || ''),
       additional_evidence_needed: Array.isArray(c.additional_evidence_needed)
         ? c.additional_evidence_needed.map(String) : [],
+      treatment_plan: c.treatment_plan || null,
+      internal_link_recommendations: Array.isArray(c.internal_link_recommendations)
+        ? c.internal_link_recommendations : [],
       merge_plan: c.merge_plan || null,
       merge_survivor: String(c.merge_survivor || ''),
       merge_absorbed: String(c.merge_absorbed || ''),
@@ -5803,18 +5966,28 @@ function sdsdEnsureSiteWideResultImportSheet_() {
   let sh = ss.getSheetByName(SDSD_CONFIG.sheets.siteWideResultImport);
   if (!sh) sh = ss.insertSheet(SDSD_CONFIG.sheets.siteWideResultImport);
 
-  if (sh.getLastRow() === 0 || String(sh.getRange('A1').getValue() || '') !== 'Doctor横断診断結果をここに貼り付け') {
-    sh.clear();
-    sh.getRange('A1').setValue('Doctor横断診断結果をここに貼り付け');
-    sh.getRange('A2').setValue(
-      'このセル以下に、Doctor回答全文、SIMS_DOCTOR_SITE_WIDE_RESULT_V1 または SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1 JSON を貼り付けてください。\n' +
-      '貼り付け後、メニュー「サイト横断の診断・治療 → 5. Doctor診断結果を登録」をもう一度実行します。'
-    );
-    sh.getRange('A1').setFontWeight('bold').setFontSize(14);
-    sh.getRange('A1:A2').setWrap(true);
-    sh.setColumnWidth(1, 1000);
-    sh.setRowHeight(2, 90);
+  const title = 'Doctor診断結果をここに貼り付け（横断診断／精密診断 共通）';
+  const instruction =
+    'このセル以下に、Doctor回答全文、SIMS_DOCTOR_SITE_WIDE_RESULT_V1 または SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1 JSON を貼り付けてください。\n' +
+    '貼り付け後、メニュー最上段の「▶ 次に進む（Diagnosisに任せる）」を実行してください。';
+
+  const currentA1 = String(sh.getRange('A1').getValue() || '');
+  const currentA2 = String(sh.getRange('A2').getValue() || '');
+
+  // Migration-safe: update labels without clearing an already pasted Doctor result.
+  sh.getRange('A1').setValue(title);
+  const looksLikePlaceholder =
+    !currentA2.trim() ||
+    currentA2.indexOf('このセル以下に、Doctor回答全文') >= 0;
+
+  if (looksLikePlaceholder) {
+    sh.getRange('A2').setValue(instruction);
   }
+
+  sh.getRange('A1').setFontWeight('bold').setFontSize(14);
+  sh.getRange('A1:A2').setWrap(true);
+  sh.setColumnWidth(1, 1000);
+  if (looksLikePlaceholder) sh.setRowHeight(2, 90);
   return sh;
 }
 
@@ -5850,7 +6023,7 @@ function sdsdClearSiteWideResultImport_() {
   }
   sh.getRange('A2').setValue(
     'このセル以下に、Doctor回答全文、SIMS_DOCTOR_SITE_WIDE_RESULT_V1 または SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1 JSON を貼り付けてください。\n' +
-    '貼り付け後、メニュー「サイト横断の診断・治療 → 5. Doctor診断結果を登録」をもう一度実行します。'
+    '貼り付け後、メニュー最上段の「▶ 次に進む（Diagnosisに任せる）」を実行してください。'
   );
 }
 
@@ -5868,11 +6041,9 @@ function sdsdRegisterSiteWideDoctorResult() {
       sdsdSetSiteWideRegisterStage_('WAITING_INPUT', 'Doctor結果取込シートへ入力待ち');
       ss.setActiveSheet(importSheet);
       ui.alert(
-        'Doctor横断診断結果の取込準備ができました。\n\n' +
-        '「Doctor結果取込」シートのA2以下へ、Doctor回答全文を貼り付けてください。\n\n' +
-        '貼り付け後、もう一度\n' +
-        '「サイト横断の診断・治療 → 5. Doctor診断結果を登録」\n' +
-        'を実行してください。'
+        'Doctor診断結果の取込準備ができました。\n\n' +
+        '「Doctor結果取込」シートのA2以下へ、Doctor回答全文またはJSONを貼り付けてください。\n\n' +
+        '貼り付け後、メニュー最上段の「▶ 次に進む（Diagnosisに任せる）」を実行してください。'
       );
       return;
     }
@@ -5884,7 +6055,11 @@ function sdsdRegisterSiteWideDoctorResult() {
     sdsdValidateSiteWideResult_(parsed);
 
     sdsdSetSiteWideRegisterStage_('NORMALIZE', 'Doctor結果を正規化');
-    const normalized = sdsdNormalizeDoctorSiteWideResult_(parsed);
+    const normalizedInput = sdsdNormalizeDoctorSiteWideResult_(parsed);
+    const isPrecision = sdsdIsSiteWidePrecisionResult_(parsed);
+    const normalized = isPrecision
+      ? sdsdMergePrecisionIntoStoredResult_(normalizedInput)
+      : normalizedInput;
 
     sdsdSetSiteWideRegisterStage_(
       'STORE_RAW_RESULT',
@@ -5900,20 +6075,37 @@ function sdsdRegisterSiteWideDoctorResult() {
       counts[c.route_to] = (counts[c.route_to] || 0) + 1;
     });
 
+    if (isPrecision) {
+      sdsdClearSiteWidePrecisionPackageState_();
+    }
+
     sdsdSetSiteWideRegisterStage_('COMPLETE', `登録完了 ${count}件`);
     sdsdClearSiteWideResultImport_();
     try{sdsdRenderHome_();}catch(e){}
 
-    ui.alert(
-      `Doctor横断診断結果を登録しました。\n\n` +
-      `診断案件: ${count}件\n` +
-      `Writer: ${counts.WRITER || 0}件\n` +
-      `Merge: ${counts.MERGE || 0}件\n` +
-      `Creator: ${counts.CREATOR || 0}件\n` +
-      `追加Evidence: ${counts.NEEDS_EVIDENCE || 0}件\n` +
-      `経過観察/処置不要: ${(counts.MONITOR || 0) + (counts.NO_ACTION || 0)}件\n\n` +
-      `「サイト治療計画」を確認してください。`
-    );
+    const completionMessage = isPrecision
+      ? (
+        `Doctor精密診断結果を登録しました。\n\n` +
+        `今回確定: ${(normalizedInput.diagnosis_cases || []).length}件\n` +
+        `残り追加Evidence: ${counts.NEEDS_EVIDENCE || 0}件\n` +
+        `Writer: ${counts.WRITER || 0}件\n` +
+        `Merge: ${counts.MERGE || 0}件\n` +
+        `Creator: ${counts.CREATOR || 0}件\n` +
+        `経過観察/処置不要: ${(counts.MONITOR || 0) + (counts.NO_ACTION || 0)}件\n\n` +
+        `続きは「▶ 次に進む（Diagnosisに任せる）」で進められます。`
+      )
+      : (
+        `Doctor診断結果を登録しました。\n\n` +
+        `診断案件: ${count}件\n` +
+        `Writer: ${counts.WRITER || 0}件\n` +
+        `Merge: ${counts.MERGE || 0}件\n` +
+        `Creator: ${counts.CREATOR || 0}件\n` +
+        `追加Evidence: ${counts.NEEDS_EVIDENCE || 0}件\n` +
+        `経過観察/処置不要: ${(counts.MONITOR || 0) + (counts.NO_ACTION || 0)}件\n\n` +
+        `「サイト治療計画」を確認してください。`
+      );
+
+    ui.alert(completionMessage);
 
   } catch(e) {
     const props = PropertiesService.getDocumentProperties();
@@ -5925,7 +6117,7 @@ function sdsdRegisterSiteWideDoctorResult() {
     sdsdSetSiteWideRegisterStage_('ERROR', `${stage}: ${message}`);
 
     ui.alert(
-      `Doctor横断診断結果を登録できませんでした。\n\n` +
+      `Doctor診断結果を登録できませんでした。\n\n` +
       `処理段階: ${stage}\n` +
       `エラー: ${message}\n\n` +
       `Doctor結果取込シートの内容は残しています。`
