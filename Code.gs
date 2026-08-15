@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.4.0-RC6';
+const SDSD_VERSION = '0.4.0-RC7';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -34,11 +34,30 @@ const SDSD_CONFIG = Object.freeze({
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
 
-  const dataMenu = ui.createMenu('データ準備')
-    .addItem('SBM改善履歴の取込案内', 'sdsdImportHistoryHelp')
-    .addItem('Article Masterの取込案内', 'sdsdArticleMasterImportHelp');
+  const precisionMenu = ui.createMenu('個別記事の精密診断')
+    .addItem('1. Doctorへ送る記事を選ぶ', 'sdsdCreateProductTreatmentBatch')
+    .addItem('2. 選定記事を見る', 'sdsdOpenSelectedCases')
+    .addItem('3. Doctor精密診断Packageを生成', 'sdsdCreateProductCasePackage');
 
-  const maintenanceMenu = ui.createMenu('保守・診断')
+  const siteWideMenu = ui.createMenu('サイト横断の診断・治療')
+    .addItem('1. 改善機会を診断', 'sdsdRunSiteOpportunityDiagnosis')
+    .addItem('2. Doctor診断案件を作成', 'sdsdBuildSiteOpportunityCases')
+    .addItem('3. 診断案件を見る', 'sdsdOpenSiteOpportunityCases')
+    .addItem('4. Doctor Packageを生成', 'sdsdExportSiteWideDoctorPackage')
+    .addSeparator()
+    .addItem('5. Doctor診断結果を登録', 'sdsdRegisterSiteWideDoctorResult')
+    .addItem('6. サイト治療計画を見る', 'sdsdOpenTreatmentPlan')
+    .addSeparator()
+    .addItem('7. 追加Evidence Packageを生成', 'sdsdExportPriorityPrecisionClusterPackage')
+    .addItem('8. 選択中のMerge紹介状を作成', 'sdsdCreateMergeReferralFromSelectedTreatment');
+
+  const setupMenu = ui.createMenu('初期設定・データ準備')
+    .addItem('初期設定を実行', 'sdsdInitialize')
+    .addSeparator()
+    .addItem('Article Masterの取込案内', 'sdsdArticleMasterImportHelp')
+    .addItem('SBM改善履歴の取込案内', 'sdsdImportHistoryHelp');
+
+  const maintenanceMenu = ui.createMenu('保守・検証')
     .addItem('Query Evidenceを診断', 'sdsdDiagnoseQueryEvidenceInput')
     .addItem('週次トレンド検証表を作成', 'sdsdValidateWeeklyTrends')
     .addItem('優先度検証表を作成', 'sdsdValidateFinalPriorities')
@@ -47,40 +66,24 @@ function onOpen() {
     .addItem('内部シートを隠す', 'sdsdHideInternalSheets');
 
   ui.createMenu('SIMS Doctor Site Diagnosis')
-    .addItem('1. 初期設定', 'sdsdInitialize')
-    .addItem('2. Evidence Packageを読み込む', 'sdsdImportEvidencePackageZip')
-    .addItem('3. サイト診断を実行', 'sdsdRunProductDiagnosis')
-    .addItem('サイト診断サマリーを見る', 'sdsdOpenSiteSummary')
+    .addItem('1. Evidence Packageを読み込む', 'sdsdImportEvidencePackageZip')
+    .addItem('2. サイト診断を実行', 'sdsdRunProductDiagnosis')
+    .addItem('3. 診断結果を見る', 'sdsdOpenSiteSummary')
     .addItem('4. 診断候補を見る', 'sdsdOpenCandidates')
     .addSeparator()
-    .addItem('5. Treatment Batchを作成', 'sdsdCreateProductTreatmentBatch')
-    .addItem('6. 選定案件を見る', 'sdsdOpenSelectedCases')
-    .addItem('7. Doctor Case Packageを生成', 'sdsdCreateProductCasePackage')
+    .addSubMenu(precisionMenu)
+    .addSubMenu(siteWideMenu)
     .addSeparator()
-    .addItem('8. サイト横断の改善機会を診断', 'sdsdRunSiteOpportunityDiagnosis')
-    .addItem('9. サイト横断診断案件を作成', 'sdsdBuildSiteOpportunityCases')
-    .addItem('10. サイト横断診断案件を見る', 'sdsdOpenSiteOpportunityCases')
-    .addItem('11. サイト横断Doctor Packageを生成', 'sdsdExportSiteWideDoctorPackage')
-    .addSeparator()
-    .addItem('12. Doctor横断診断結果を登録', 'sdsdRegisterSiteWideDoctorResult')
-    .addItem('13. サイト治療計画を見る', 'sdsdOpenTreatmentPlan')
-    .addItem('14. 優先クラスタの精密診断Packageを生成', 'sdsdExportPriorityPrecisionClusterPackage')
-    .addItem('15. 選択中のMerge紹介状を作成', 'sdsdCreateMergeReferralFromSelectedTreatment')
-    .addSeparator()
-    .addSubMenu(dataMenu)
+    .addSubMenu(setupMenu)
     .addSubMenu(maintenanceMenu)
     .addToUi();
-
-  try { sdsdHideInternalSheets_(); } catch (e) {}
-  try { sdsdRefreshCandidatesView_(); } catch (e) {}
-  try { sdsdRefreshSelectedCasesView_(); } catch (e) {}
 }
 
 function sdsdInitialize() {
   sdsdProductEnsureSheets_();
   sdsdHideInternalSheets_();
   SpreadsheetApp.getUi().alert(
-    `SIMS Doctor Site Diagnosis ${SDSD_VERSION}\n初期設定が完了しました。\n\n次に「2. Evidence Packageを読み込む」を実行してください。`
+    `SIMS Doctor Site Diagnosis ${SDSD_VERSION}\n初期設定が完了しました。\n\n次に「1. Evidence Packageを読み込む」を実行してください。`
   );
 }
 
@@ -696,7 +699,7 @@ function sdsdRunProductDiagnosis() {
       `Doctor精密診断の優先候補: ${result.priorityCandidates}件\n` +
       `回復・成長中のため保護: ${result.protected}件\n` +
       `SBMの日常改善対象: ${result.sbm}件\n\n` +
-      `「サイト診断サマリー」でブログ全体の状態を確認してください。\n` +
+      `「3. 診断結果を見る」でブログ全体の状態を確認してください。\n` +
       `詳しい記事一覧は「4. 診断候補を見る」で確認できます。`
     );
   } catch (e) {
@@ -723,7 +726,7 @@ function sdsdCreateProductTreatmentBatch() {
       `Doctor精密診断の適格候補: ${batch.eligibleCount}件\n` +
       `今回Doctorへ送る記事: ${batch.selectedCount}件\n` +
       `最終確認で保留: ${guard.blocked}件\n\n` +
-      `次に「6. 選定案件を見る」で内容を確認してください。`
+      `次に「個別記事の精密診断 → 2. 選定記事を見る」で内容を確認してください。`
     );
   } catch (e) {
     SpreadsheetApp.getUi().alert(
@@ -751,9 +754,9 @@ function sdsdCreateProductCasePackage() {
         `今回の診断対象: ${coverage.selected}件\n` +
         `Article MasterでURL一致: ${coverage.matched}件\n` +
         `ArticleIDまで確認できた記事: ${coverage.withArticleId}件\n\n` +
-        `「データ準備 → Article Masterの取込案内」から、` +
+        `「初期設定・データ準備 → Article Masterの取込案内」から、` +
         `今回診断しているブログのSBM「記事管理」CSVを取り込んでください。\n\n` +
-        `取り込んだ後は1～5をやり直さず、もう一度「7. Doctor Case Packageを生成」を実行できます。`
+        `取り込んだ後は前の処理をやり直さず、「個別記事の精密診断 → 3. Doctor精密診断Packageを生成」をもう一度実行できます。`
       );
       return;
     }
@@ -772,7 +775,7 @@ function sdsdCreateProductCasePackage() {
         `準備完了: ${enrichment.ready}/${enrichment.total}件\n` +
         `要確認: ${enrichment.review}件\n` +
         `未処理: ${enrichment.pending}件\n\n` +
-        `「6. 選定案件を見る」で要確認案件を確認してください。`
+        `「個別記事の精密診断 → 2. 選定記事を見る」で要確認案件を確認してください。`
       );
       return;
     }
@@ -783,7 +786,7 @@ function sdsdCreateProductCasePackage() {
         `準備完了: ${enrichment.ready}/${enrichment.total}件\n` +
         `未処理: ${enrichment.pending}件\n\n` +
         `今回の処理結果は保存しました。\n` +
-        `もう一度「7. Doctor Case Packageを生成」を実行すると、未処理の記事から続けます。`
+        `もう一度「個別記事の精密診断 → 3. Doctor精密診断Packageを生成」を実行すると、未処理の記事から続けます。`
       );
       return;
     }
@@ -1860,7 +1863,7 @@ function sdsdImportEvidencePackageZip() {
     `page_query_top: ${report[2].dataRows}行\n\n` +
     `Query URL数: ${diag.queryUrlCount}\n` +
     `Query行数: ${diag.queryRows}\n\n` +
-    `次に「3. サイト診断を実行」を実行してください。`
+    `次に「2. サイト診断を実行」を実行してください。`
   );
 }
 
@@ -3424,7 +3427,7 @@ function sdsdSiteWidePackageRows_() {
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName(SDSD_CONFIG.sheets.opportunityCases);
   if (!sh || sh.getLastRow() < 2) {
-    throw new Error('先に「9. サイト横断診断案件を作成」を実行してください。');
+    throw new Error('先に「サイト横断の診断・治療 → 2. Doctor診断案件を作成」を実行してください。');
   }
 
   const values = sh.getDataRange().getValues();
@@ -3540,7 +3543,7 @@ function sdsdBuildSiteWideDoctorInstructions_(rows) {
     '',
     '## 出力してほしいもの',
     '',
-    '- 返却JSON format は SIMS_DOCTOR_SITE_WIDE_RESULT_V1 としてください。\n- 返却先はSBMの単体診断登録欄ではありません。利用者はSite Diagnosisの「12. Doctor横断診断結果を登録」へ貼り付けます。\n- 可能なら diagnosis_cases[] の正規形式で返してください。難しい場合は priority_queue_for_precision_diagnosis / content_gap_merged_into_existing_theme / sbm_routine_queue_high_confidence_standalone / low_priority_monitor_medium_confidence_single_query / creator_candidates_pending_cannibalization_check の一次トリアージ形式でも受け付けます。\n- サイト全体の総合診断',
+    '- 返却JSON format は SIMS_DOCTOR_SITE_WIDE_RESULT_V1 としてください。\n- 返却先はSBMの単体診断登録欄ではありません。利用者はSite Diagnosisの「サイト横断の診断・治療 → 5. Doctor診断結果を登録」から登録します。\n- 可能なら diagnosis_cases[] の正規形式で返してください。難しい場合は priority_queue_for_precision_diagnosis / content_gap_merged_into_existing_theme / sbm_routine_queue_high_confidence_standalone / low_priority_monitor_medium_confidence_single_query / creator_candidates_pending_cannibalization_check の一次トリアージ形式でも受け付けます。\n- サイト全体の総合診断',
     '- 優先して処置すべき案件',
     '- 各案件の最終振り分け（MONITOR / Writer / Merge / Creator / 追加Evidence）',
     '- 共通原因がある場合は、案件横断でまとめて説明',
@@ -4035,7 +4038,7 @@ function sdsdCreateMergeReferralFromSelectedTreatment() {
 function sdsdReadStoredSiteWideResult_() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.siteWideResult);
   if (!sh || !sh.getRange('A1').getValue()) {
-    throw new Error('Doctor横断診断結果が登録されていません。先に「12. Doctor横断診断結果を登録」を実行してください。');
+    throw new Error('Doctor横断診断結果が登録されていません。先に「サイト横断の診断・治療 → 5. Doctor診断結果を登録」を実行してください。');
   }
   const raw = String(sh.getRange('A1').getValue() || '');
   const obj = JSON.parse(raw);
@@ -4802,7 +4805,7 @@ function sdsdEnsureSiteWideResultImportSheet_() {
     sh.getRange('A1').setValue('Doctor横断診断結果をここに貼り付け');
     sh.getRange('A2').setValue(
       'このセル以下に、Doctor回答全文、SIMS_DOCTOR_SITE_WIDE_RESULT_V1 または SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1 JSON を貼り付けてください。\n' +
-      '貼り付け後、メニュー「12. Doctor横断診断結果を登録」をもう一度実行します。'
+      '貼り付け後、メニュー「サイト横断の診断・治療 → 5. Doctor診断結果を登録」をもう一度実行します。'
     );
     sh.getRange('A1').setFontWeight('bold').setFontSize(14);
     sh.getRange('A1:A2').setWrap(true);
@@ -4844,7 +4847,7 @@ function sdsdClearSiteWideResultImport_() {
   }
   sh.getRange('A2').setValue(
     'このセル以下に、Doctor回答全文、SIMS_DOCTOR_SITE_WIDE_RESULT_V1 または SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1 JSON を貼り付けてください。\n' +
-    '貼り付け後、メニュー「12. Doctor横断診断結果を登録」をもう一度実行します。'
+    '貼り付け後、メニュー「サイト横断の診断・治療 → 5. Doctor診断結果を登録」をもう一度実行します。'
   );
 }
 
@@ -4865,7 +4868,7 @@ function sdsdRegisterSiteWideDoctorResult() {
         'Doctor横断診断結果の取込準備ができました。\n\n' +
         '「Doctor結果取込」シートのA2以下へ、Doctor回答全文を貼り付けてください。\n\n' +
         '貼り付け後、もう一度\n' +
-        '「12. Doctor横断診断結果を登録」\n' +
+        '「サイト横断の診断・治療 → 5. Doctor診断結果を登録」\n' +
         'を実行してください。'
       );
       return;
