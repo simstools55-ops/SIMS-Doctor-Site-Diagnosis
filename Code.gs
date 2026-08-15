@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.4.0-RC9.3.3';
+const SDSD_VERSION = '0.5.0';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -35,43 +35,43 @@ const SDSD_CONFIG = Object.freeze({
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
 
-  const wholeSiteMenu = ui.createMenu('1. サイト全体を診断する')
-    .addItem('Evidence Packageを読み込む', 'sdsdImportEvidencePackageZip')
-    .addItem('サイト診断を実行', 'sdsdRunProductDiagnosis')
+  const checkMenu = ui.createMenu('確認する')
     .addItem('サイト診断詳細を見る', 'sdsdOpenSiteSummary')
     .addItem('診断候補を見る', 'sdsdOpenCandidates')
+    .addItem('個別精密診断対象を見る', 'sdsdOpenSelectedCases')
+    .addItem('サイト治療計画を見る', 'sdsdOpenTreatmentPlan');
+
+  const manualMenu = ui.createMenu('手動・保守操作')
+    .addItem('Evidence Packageを読み込む', 'sdsdImportEvidencePackageZip')
+    .addItem('サイト診断を実行', 'sdsdRunProductDiagnosis')
     .addSeparator()
     .addItem('横断診断：改善機会を診断', 'sdsdRunSiteOpportunityDiagnosis')
     .addItem('横断診断：Doctor案件を作成', 'sdsdBuildSiteOpportunityCases')
     .addItem('横断診断：Doctor Packageを生成', 'sdsdExportSiteWideDoctorPackage')
-    .addItem('横断診断：Doctor結果を登録', 'sdsdRegisterSiteWideDoctorResult');
-
-  const treatmentMenu = ui.createMenu('2. 見つかった問題を処置する')
-    .addItem('個別記事：優先記事の精密診断を進める', 'sdsdProceedIndividualPrecisionDiagnosis')
-    .addItem('個別記事：自動選定された記事を見る', 'sdsdOpenSelectedCases')
+    .addItem('横断診断：Doctor結果を登録', 'sdsdRegisterSiteWideDoctorResult')
+    .addSeparator()
     .addItem('個別記事：精密診断Packageを生成・再開', 'sdsdProceedIndividualPrecisionDiagnosis')
-    .addSeparator()
-    .addItem('横断診断：サイト治療計画を見る', 'sdsdOpenTreatmentPlan')
     .addItem('横断診断：追加Evidence Packageを生成', 'sdsdExportPriorityPrecisionClusterPackage')
-    .addItem('横断診断：選択中のMerge紹介状を作成', 'sdsdCreateMergeReferralFromSelectedTreatment');
-
-  const otherMenu = ui.createMenu('その他・管理')
-    .addItem('現在の診断状況を確認', 'sdsdShowCurrentSessionStatus')
-    .addItem('現在の診断を終了', 'sdsdEndCurrentDiagnosisSession')
+    .addItem('横断診断：選択中のMerge紹介状を作成', 'sdsdCreateMergeReferralFromSelectedTreatment')
     .addSeparator()
-    .addItem('初期設定を実行', 'sdsdInitialize')
     .addItem('Article Master（任意）の案内', 'sdsdArticleMasterImportHelp')
     .addItem('SBM改善履歴の取込案内', 'sdsdImportHistoryHelp')
     .addSeparator()
     .addItem('内部シートを表示', 'sdsdShowInternalSheets')
     .addItem('内部シートを隠す', 'sdsdHideInternalSheets');
 
+  const otherMenu = ui.createMenu('その他・管理')
+    .addItem('現在の診断状況を確認', 'sdsdShowCurrentSessionStatus')
+    .addItem('現在の診断を終了', 'sdsdEndCurrentDiagnosisSession')
+    .addSeparator()
+    .addItem('初期設定を実行', 'sdsdInitialize')
+    .addSubMenu(manualMenu);
+
   ui.createMenu('SIMS Doctor Site Diagnosis')
     .addItem('Homeを開く', 'sdsdOpenHome')
     .addItem('▶ 次に進む（Diagnosisに任せる）', 'sdsdProceedNextGuided')
     .addSeparator()
-    .addSubMenu(wholeSiteMenu)
-    .addSubMenu(treatmentMenu)
+    .addSubMenu(checkMenu)
     .addSeparator()
     .addSubMenu(otherMenu)
     .addToUi();
@@ -164,7 +164,7 @@ function sdsdHomeGuide_(session,m,work,stored){
     return {
       title:'Evidence Packageを読み込んでください',
       reason:'まだ診断対象サイトのデータが読み込まれていません。',
-      path:'1. サイト全体を診断する → Evidence Packageを読み込む',
+      path:'メニュー最上段 → ▶ 次に進む（Diagnosisに任せる）',
       tone:'BLUE'
     };
   }
@@ -173,7 +173,7 @@ function sdsdHomeGuide_(session,m,work,stored){
     return {
       title:'Doctorの横断診断結果を登録してください',
       reason:'Doctorへ依頼する段階は完了しています。返ってきた診断結果をDiagnosisへ戻す段階です。',
-      path:'1. サイト全体を診断する → 横断診断：Doctor結果を登録',
+      path:'メニュー最上段 → ▶ 次に進む（Diagnosisに任せる）',
       tone:'YELLOW'
     };
   }
@@ -193,7 +193,7 @@ function sdsdHomeGuide_(session,m,work,stored){
       return {
         title:`詳しい診断が必要な案件が${work.additionalEvidence}件あります`,
         reason:'Doctorが、現在の情報だけでは治療方法を確定できないと判断しました。記事本文などを追加して詳しく診断します。',
-        path:'2. 見つかった問題を処置する → 横断診断：追加Evidence Packageを生成',
+        path:'メニュー最上段 → ▶ 次に進む（Diagnosisに任せる）',
         tone:'YELLOW'
       };
     }
@@ -201,7 +201,7 @@ function sdsdHomeGuide_(session,m,work,stored){
       return {
         title:`治療へ進める案件が${work.actionableTreatment}件あります`,
         reason:'Doctorの診断で治療方針が決まりました。Writer / Merge / Creatorへ引き渡します。',
-        path:'2. 見つかった問題を処置する → サイト治療計画を見る',
+        path:'確認する → サイト治療計画を見る',
         tone:'BLUE'
       };
     }
@@ -217,7 +217,7 @@ function sdsdHomeGuide_(session,m,work,stored){
     return {
       title:'Doctorによるサイト横断診断を進めてください',
       reason:`Diagnosisが複数記事をまとめて確認すべき案件を${work.opportunityCases}件作成済みです。`,
-      path:'1. サイト全体を診断する → 横断診断：Doctor Packageを生成',
+      path:'メニュー最上段 → ▶ 次に進む（Diagnosisに任せる）',
       tone:'BLUE'
     };
   }
@@ -230,7 +230,7 @@ function sdsdHomeGuide_(session,m,work,stored){
     return {
       title:'Doctorによるサイト横断診断が必要です',
       reason:`Diagnosisが、1記事だけでは判断しにくい関連案件を検出しました（${reasons.join('、')||m.crossTotal+'件'}）。利用者が要否を判断する必要はありません。`,
-      path:'1. サイト全体を診断する → 横断診断：Doctor案件を作成',
+      path:'メニュー最上段 → ▶ 次に進む（Diagnosisに任せる）',
       tone:'YELLOW'
     };
   }
@@ -366,7 +366,7 @@ function sdsdInitialize() {
   sdsdProductEnsureSheets_();
   sdsdHideInternalSheets_();
   SpreadsheetApp.getUi().alert(
-    `SIMS Doctor Site Diagnosis ${SDSD_VERSION}\n初期設定が完了しました。\n\n次に「1. Evidence Packageを読み込む」を実行してください。`
+    `SIMS Doctor Site Diagnosis ${SDSD_VERSION}\n初期設定が完了しました。\n\n次にメニュー最上段の「▶ 次に進む（Diagnosisに任せる）」を実行してください。`
   );
 }
 
@@ -1108,7 +1108,7 @@ function sdsdProceedIndividualPrecisionDiagnosis(){
         `精密診断Packageの準備中に、追加確認が必要な記事が見つかりました。\n\n` +
         `準備完了: ${enrichment.ready}/${enrichment.total}件\n` +
         `要確認: ${enrichment.review}件\n\n` +
-        '「2. 見つかった問題を処置する → 個別記事：自動選定された記事を見る」で内容を確認してください。\n' +
+        '「確認する → 個別精密診断対象を見る」で内容を確認してください。\n' +
         '利用者判断が不要な案件はDiagnosis側で処理を続けます。'
       );
       try{sdsdRenderHome_();}catch(e){}
@@ -1246,7 +1246,7 @@ function sdsdCreateProductTreatmentBatch() {
       `Doctor精密診断の適格候補: ${batch.eligibleCount}件\n` +
       `今回Doctorへ送る記事: ${batch.selectedCount}件\n` +
       `最終確認で保留: ${guard.blocked}件\n\n` +
-      `次に「2. 見つかった問題を処置する → 個別記事：自動選定された記事を見る」で内容を確認してください。`
+      `次に「確認する → 個別精密診断対象を見る」で内容を確認してください。`
     );
   } catch (e) {
     SpreadsheetApp.getUi().alert(
@@ -1581,49 +1581,46 @@ function sdsdEnrichSelectedCases(options) {
   const sh = ss.getSheetByName(SDSD_CONFIG.sheets.selectedCases);
   if (!sh) throw new Error('先に Treatment Batch を生成してください。');
 
-  const values = sh.getDataRange().getValues();
+  let values = sh.getDataRange().getValues();
   if (values.length < 2) throw new Error('今回の診断対象に案件がありません。');
 
-  const headers = values[0].map(String);
+  let headers = values[0].map(String);
   const idx = {};
   headers.forEach((h,i) => idx[h] = i);
 
   const articleMap = sdsdBuildArticleMasterMap_();
-  const queryMap = sdsdBuildQueryEvidenceMap_();
-  const querySourceCount = sdsdQueryEvidenceSourceCount_();
+  const queryBundle = sdsdBuildQueryEvidenceBundle_();
+  const queryMap = queryBundle.map;
+  const querySourceCount = queryBundle.sourceCount;
 
   const extraHeaders = [
     'ArticleID','Article Title','Main Query','Article Fetch Status',
     'Case Package Status','Article Cache Key','Query Evidence Count'
   ];
 
-  let lastCol = headers.length;
-  extraHeaders.forEach(h => {
-    if (idx[h] == null) {
-      lastCol++;
-      sh.getRange(1,lastCol).setValue(h);
-      idx[h] = lastCol - 1;
-      headers.push(h);
-    }
-  });
-
-  const firstTechnicalCol = headers.indexOf('Batch Order') + 1;
-  if (firstTechnicalCol > 0) {
-    sdsdHideTechnicalColumns_(sh, firstTechnicalCol, sh.getLastColumn());
+  const missingHeaders = extraHeaders.filter(h => idx[h] == null);
+  if (missingHeaders.length) {
+    const startCol = headers.length + 1;
+    sh.getRange(1, startCol, 1, missingHeaders.length).setValues([missingHeaders]);
+    headers = headers.concat(missingHeaders);
   }
 
-  // Refresh values after any missing technical columns were added.
+  // Read once after schema normalization; all case updates below happen in memory.
   const data = sh.getDataRange().getValues();
   const refreshedHeaders = data[0].map(String);
   const col = {};
   refreshedHeaders.forEach((h,i) => col[h] = i);
+
+  const firstTechnicalCol = refreshedHeaders.indexOf('Batch Order') + 1;
+  if (firstTechnicalCol > 0) {
+    sdsdHideTechnicalColumns_(sh, firstTechnicalCol, sh.getLastColumn());
+  }
 
   const cache = CacheService.getDocumentCache();
   let alreadyReady = 0;
   let processedThisRun = 0;
   let newlyReady = 0;
   let failed = 0;
-  let remaining = 0;
 
   const candidateRows = [];
 
@@ -1638,13 +1635,10 @@ function sdsdEnrichSelectedCases(options) {
       alreadyReady++;
       continue;
     }
-
     candidateRows.push(r);
   }
 
-  // Work on only a small number per invocation. Existing READY rows are preserved.
   const workRows = candidateRows.slice(0, maxPerRun);
-  remaining = Math.max(candidateRows.length - workRows.length, 0);
 
   for (let wi=0; wi<workRows.length; wi++) {
     const r = workRows[wi];
@@ -1657,14 +1651,14 @@ function sdsdEnrichSelectedCases(options) {
     const articleId = identityInfo.articleId;
     const queryEvidence = (queryMap[sdsdNormalizeUrl_(url)] || []).slice(0,10);
 
-    // Query evidence remains a true diagnostic prerequisite when Collector provided query data.
+    row[col['ArticleID']] = articleId;
+    row[col['Article Title']] = master ? String(master.title || '') : '';
+    row[col['Main Query']] = master ? String(master.mainQuery || '') : '';
+    row[col['Query Evidence Count']] = queryEvidence.length;
+
     if (querySourceCount > 0 && queryEvidence.length === 0) {
-      sh.getRange(r+1, col['ArticleID']+1).setValue(articleId);
-      sh.getRange(r+1, col['Article Title']+1).setValue(master ? String(master.title || '') : '');
-      sh.getRange(r+1, col['Main Query']+1).setValue(master ? String(master.mainQuery || '') : '');
-      sh.getRange(r+1, col['Query Evidence Count']+1).setValue(0);
-      sh.getRange(r+1, col['Case Package Status']+1).setValue('QUERY_EVIDENCE_MISSING');
-      sh.getRange(r+1, col['Referral Status']+1).setValue('NEEDS_CASE_ENRICHMENT_REVIEW');
+      row[col['Case Package Status']] = 'QUERY_EVIDENCE_MISSING';
+      row[col['Referral Status']] = 'NEEDS_CASE_ENRICHMENT_REVIEW';
       failed++;
       processedThisRun++;
       continue;
@@ -1678,21 +1672,18 @@ function sdsdEnrichSelectedCases(options) {
       ? String(master.mainQuery)
       : String((queryEvidence[0] && queryEvidence[0].query) || '');
 
-    sh.getRange(r+1, col['ArticleID']+1).setValue(articleId);
-    sh.getRange(r+1, col['Article Title']+1).setValue(title || fetched.title);
-    sh.getRange(r+1, col['Main Query']+1).setValue(mainQuery);
-    sh.getRange(r+1, col['Article Fetch Status']+1).setValue(fetched.status);
-    sh.getRange(r+1, col['Query Evidence Count']+1).setValue(queryEvidence.length);
+    row[col['Article Title']] = title || fetched.title;
+    row[col['Main Query']] = mainQuery;
+    row[col['Article Fetch Status']] = fetched.status;
+    row[col['Query Evidence Count']] = queryEvidence.length;
 
     if (col['Top Queries'] != null) {
-      sh.getRange(r+1, col['Top Queries']+1).setValue(
-        queryEvidence.map(q => q.query).join(' / ')
-      );
+      row[col['Top Queries']] = queryEvidence.map(q => q.query).join(' / ');
     }
 
     if (fetched.status !== 'VALID') {
-      sh.getRange(r+1, col['Case Package Status']+1).setValue('ARTICLE_FETCH_REVIEW');
-      sh.getRange(r+1, col['Referral Status']+1).setValue('NEEDS_CASE_ENRICHMENT_REVIEW');
+      row[col['Case Package Status']] = 'ARTICLE_FETCH_REVIEW';
+      row[col['Referral Status']] = 'NEEDS_CASE_ENRICHMENT_REVIEW';
       failed++;
       processedThisRun++;
       continue;
@@ -1741,7 +1732,6 @@ function sdsdEnrichSelectedCases(options) {
       sdsdBuildRequestId_(batchId, articleId)
     );
 
-    // Identity Contract: use SBM ArticleID when available; otherwise preserve stable URL-surrogate + canonical URL.
     referral.case_id = referral.case_identity.individual_case_id;
     referral.request_id = referral.case_identity.request_id;
     referral.site_diagnosis_case_id = referral.case_identity.site_diagnosis_case_id;
@@ -1827,32 +1817,30 @@ function sdsdEnrichSelectedCases(options) {
       '既存の有効な独自情報・広告・アフィリエイト要素は保護対象として評価する'
     ];
 
-    sh.getRange(r+1, col['Referral JSON']+1).setValue(JSON.stringify(referral));
-    sh.getRange(r+1, col['Article Cache Key']+1).setValue(cacheKey);
-    sh.getRange(r+1, col['Referral Status']+1).setValue('READY_FOR_INDIVIDUAL_DOCTOR');
-    sh.getRange(r+1, col['Case Package Status']+1).setValue('READY');
+    row[col['Referral JSON']] = JSON.stringify(referral);
+    row[col['Article Cache Key']] = cacheKey;
+    row[col['Referral Status']] = 'READY_FOR_INDIVIDUAL_DOCTOR';
+    row[col['Case Package Status']] = 'READY';
 
     newlyReady++;
     processedThisRun++;
   }
 
+  // One sheet write for all case rows instead of many per-cell writes.
+  if (data.length > 1 && refreshedHeaders.length > 0) {
+    sh.getRange(2, 1, data.length - 1, refreshedHeaders.length).setValues(data.slice(1));
+  }
   SpreadsheetApp.flush();
-
-  // Recalculate current totals from the sheet after saving this chunk.
-  const finalValues = sh.getDataRange().getValues();
-  const finalHeaders = finalValues[0].map(String);
-  const finalIdx = {};
-  finalHeaders.forEach((h,i) => finalIdx[h] = i);
 
   let total = 0;
   let readyTotal = 0;
   let reviewTotal = 0;
 
-  finalValues.slice(1).forEach(r => {
-    if (!String(r[finalIdx['URL']] || '')) return;
+  data.slice(1).forEach(r => {
+    if (!String(r[col['URL']] || '')) return;
     total++;
-    const rs = String(r[finalIdx['Referral Status']] || '');
-    const ps = String(r[finalIdx['Case Package Status']] || '');
+    const rs = String(r[col['Referral Status']] || '');
+    const ps = String(r[col['Case Package Status']] || '');
 
     if (rs === 'READY_FOR_INDIVIDUAL_DOCTOR' && ps === 'READY') {
       readyTotal++;
@@ -2382,7 +2370,7 @@ function sdsdShowCurrentSessionStatus() {
   if (!session.active) {
     ui.alert(
       '現在、診断中のサイトはありません。\n\n' +
-      '「1. サイト全体を診断する → Evidence Packageを読み込む」から診断を開始してください。'
+      'メニュー最上段の「▶ 次に進む（Diagnosisに任せる）」から診断を開始してください。'
     );
     return;
   }
@@ -2398,7 +2386,7 @@ function sdsdShowCurrentSessionStatus() {
     `サイト横断Doctor案件: ${work.opportunityCases}件\n` +
     `Writer/Merge/Creator振り分け: ${work.actionableTreatment}件\n` +
     `追加Evidence待ち: ${work.additionalEvidence}件\n\n` +
-    '別サイトを診断する場合は、先に「診断セッション → 現在の診断を終了」を実行してください。'
+    '別サイトを診断する場合は、先に「その他・管理 → 現在の診断を終了」を実行してください。'
   );
 }
 
@@ -2468,7 +2456,7 @@ function sdsdEndCurrentDiagnosisSession() {
   ui.alert(
     '現在の診断セッションを終了しました。\n\n' +
     '作業データをクリアしました。\n' +
-    '次に「1. Evidence Packageを読み込む」から別サイトの診断を開始できます。'
+    '別サイトを診断するときは、メニュー最上段の「▶ 次に進む（Diagnosisに任せる）」から開始できます。'
   );
 }
 
@@ -2725,23 +2713,23 @@ function sdsdRunFinalGuard(options) {
 
     const guard = sdsdRecentTreatmentGuard_(url, historyMap);
     if (guard.status === 'WAIT') {
-      sh.getRange(i+1, idx['Recent Treatment Guard']+1).setValue('WAIT');
-      sh.getRange(i+1, idx['Referral Status']+1).setValue('BLOCKED_BY_FINAL_GUARD');
+      values[i][idx['Recent Treatment Guard']] = 'WAIT';
+      values[i][idx['Referral Status']] = 'BLOCKED_BY_FINAL_GUARD';
       blocked++;
     }
   }
 
-  // 利用者向け「状態」列も同期する。
   const userStatusIdx = headers.indexOf('状態');
-  if (userStatusIdx >= 0 && values.length > 1) {
-    const refreshed = sh.getDataRange().getValues();
-    const refIdx = headers.indexOf('Referral Status');
-    const statuses = refreshed.slice(1).map(r => {
-      const ref = String(r[refIdx] || '');
-      return [ref.indexOf('BLOCK') >= 0 ? '保留' : 'Doctor診断待ち'];
-    });
-    if (statuses.length) sh.getRange(2, userStatusIdx + 1, statuses.length, 1).setValues(statuses);
+  const refIdx = headers.indexOf('Referral Status');
+  if (userStatusIdx >= 0 && refIdx >= 0) {
+    for (let i=1; i<values.length; i++) {
+      const ref = String(values[i][refIdx] || '');
+      values[i][userStatusIdx] = ref.indexOf('BLOCK') >= 0 ? '保留' : 'Doctor診断待ち';
+    }
   }
+
+  // Persist guard and user-facing status changes in one batch.
+  sh.getRange(2, 1, values.length - 1, headers.length).setValues(values.slice(1));
 
   const result = {checked: values.length - 1, blocked: blocked};
   if (!options.silent) {
@@ -2866,7 +2854,7 @@ function sdsdObjectValue_(obj, names) {
   return '';
 }
 
-function sdsdBuildQueryEvidenceMap_() {
+function sdsdBuildQueryEvidenceBundle_() {
   const rows = sdsdReadObjects_(SDSD_CONFIG.sheets.evidencePageQuery);
   const map = {};
 
@@ -2896,12 +2884,18 @@ function sdsdBuildQueryEvidenceMap_() {
     });
   });
 
-  return map;
+  return {map: map, sourceCount: rows.length};
+}
+
+function sdsdBuildQueryEvidenceMap_() {
+  return sdsdBuildQueryEvidenceBundle_().map;
 }
 
 function sdsdQueryEvidenceSourceCount_() {
-  return sdsdReadObjects_(SDSD_CONFIG.sheets.evidencePageQuery).length;
+  return sdsdBuildQueryEvidenceBundle_().sourceCount;
 }
+
+
 
 // ============================================================================
 // Source: QueryEvidenceDiagnostics.gs

@@ -1,3 +1,16 @@
+# v0.5.0
+
+- Promoted Site Diagnosis from the RC9.3.x line to the three-number product version scheme.
+- Simplified normal operation around `Home`, `▶ 次に進む（Diagnosisに任せる）`, and the `確認する` menu.
+- Moved direct workflow commands to `その他・管理 → 手動・保守操作`; retained them for recovery and maintenance.
+- Removed duplicate user-facing menu entries that called the same individual precision diagnosis function.
+- Updated Home, session, initialization, and completion guidance to the current guided-action menu model.
+- Batched Case Enrichment sheet writes instead of repeated per-cell writes.
+- Read Query Evidence once per Case Enrichment invocation and reuse both the map and source count.
+- Batched Final Guard sheet/status writes.
+- Preserved diagnosis/scoring algorithms, treatment rules, Article Identity semantics, caching, `maxPerRun = 3`, and staged resume behavior.
+- Release ZIP is reduced to the current product files and excludes repository metadata, old Hotfix/Sprint/RC application notes, and development artifacts.
+
 # v0.4.0-RC9.3.3
 
 - Fixed stale title propagation in individual Doctor packages.
