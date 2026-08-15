@@ -1,3 +1,26 @@
+# v0.5.3
+
+- Unified Home/additional-Evidence counts and precision-package selection around the same `route_to = NEEDS_EVIDENCE` predicate.
+- Removed the legacy `doctor_decision = ADDITIONAL_EVIDENCE_REQUIRED` hard filter from precision-cluster selection.
+- Preserved the existing maximum of five precision clusters per package.
+- Refreshes Home when no current precision cases exist so the UI does not retain a contradictory pending count.
+- Preserved v0.5.2 individual Doctor-to-SBM handoff state, handed-off article exclusion, Home version display, and diagnosis/scoring behavior.
+
+# v0.5.2
+
+- Added the current product version to Diagnosis Home using `SDSD_VERSION`.
+- Corrected the individual Doctor result handoff: individual case results return to SIMS-Blog-Manager, not Site Diagnosis.
+- Added explicit confirmation that Doctor results were registered in SBM before marking the individual batch handed off.
+- Records handed-off article URLs for the active diagnosis session and excludes them from subsequent individual precision selection.
+- Keeps handed-off case rows for traceability while excluding them from pending-work counts.
+- Clears individual Doctor package/wait/completed state when the diagnosis session ends.
+- Preserved diagnosis/scoring logic, treatment rules, `maxPerRun = 3`, caching, and staged execution behavior.
+
+# v0.5.1
+
+- Fixed guided routing after individual Doctor Package export.
+- Added `WAITING_DOCTOR_RESULT` state so `▶ 次に進む` does not regenerate the same Doctor Package while awaiting results.
+
 # v0.5.0
 
 - Promoted Site Diagnosis from the RC9.3.x line to the three-number product version scheme.

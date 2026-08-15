@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.5.0';
+const SDSD_VERSION = '0.5.3';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -178,6 +178,16 @@ function sdsdHomeGuide_(session,m,work,stored){
     };
   }
 
+  const individualPackage=sdsdGetIndividualDoctorPackageState_();
+  if(individualPackage.status==='WAITING_DOCTOR_RESULT'){
+    return {
+      title:'Doctor結果をSIMS-Blog-Managerへ登録してください',
+      reason:'個別精密診断Packageは生成済みです。Doctorから返った各記事の診断結果はSBMへ登録し、完了後にDiagnosisへ引き渡し完了を記録します。',
+      path:'メニュー最上段 → ▶ 次に進む（Diagnosisに任せる）',
+      tone:'YELLOW'
+    };
+  }
+
   const individualEligible=sdsdEligibleIndividualPrecisionCount_();
   if(individualEligible>0){
     return {
@@ -296,12 +306,13 @@ function sdsdRenderHome_(){
   sh.getRange('A2:H2').merge().setValue('この画面を見れば、サイトの状態と次に行う作業が分かります。');
   sh.getRange('A3:H3').merge().setValue('迷ったときは、メニュー最上段の「▶ 次に進む（Diagnosisに任せる）」を実行してください。');
 
-  sh.getRange('A4:B8').setValues([
+  sh.getRange('A4:B9').setValues([
     ['対象サイト',siteLabel],
     ['Evidence',session.evidenceFileName||'未読込'],
     ['総合状態',overall.label],
     ['診断候補',metrics.total+'件'],
-    ['要確認作業',work.pendingTotal+'件']
+    ['要確認作業',work.pendingTotal+'件'],
+    ['バージョン','v'+SDSD_VERSION]
   ]);
 
   sh.getRange('D4:H4').merge().setValue('サイト全体の分析結果');
@@ -332,8 +343,8 @@ function sdsdRenderHome_(){
   sh.getRange('A2:H2').setBackground('#D2E3FC').setFontColor('#174EA6').setFontSize(11);
   sh.getRange('A3:H3').setBackground('#E6F4EA').setFontColor('#137333').setFontWeight('bold').setFontSize(11);
 
-  sh.getRange('A4:A8').setBackground('#F1F3F4').setFontWeight('bold').setFontColor('#5F6368');
-  sh.getRange('B4:B8').setBackground('#FFFFFF');
+  sh.getRange('A4:A9').setBackground('#F1F3F4').setFontWeight('bold').setFontColor('#5F6368');
+  sh.getRange('B4:B9').setBackground('#FFFFFF');
   sh.getRange('B6').setBackground(overallColor.bg).setFontColor(overallColor.fg).setFontWeight('bold');
 
   sh.getRange('D4:H4').setBackground('#D2E3FC').setFontColor('#174EA6').setFontWeight('bold');
@@ -355,9 +366,9 @@ function sdsdRenderHome_(){
   sh.setColumnWidth(3,20);sh.setColumnWidth(4,145);sh.setColumnWidth(5,105);
   sh.setColumnWidth(6,150);sh.setColumnWidth(7,150);sh.setColumnWidth(8,150);
   sh.setRowHeight(1,36);sh.setRowHeight(2,28);
-  sh.setRowHeights(4,5,30);sh.setRowHeights(11,16,28);
+  sh.setRowHeights(4,6,30);sh.setRowHeights(11,16,28);
   sh.getRange('A1:H26').setBorder(false,false,false,false,false,false);
-  sh.getRange('A4:B8').setBorder(true,true,true,true,true,true,'#DADCE0',SpreadsheetApp.BorderStyle.SOLID);
+  sh.getRange('A4:B9').setBorder(true,true,true,true,true,true,'#DADCE0',SpreadsheetApp.BorderStyle.SOLID);
   sh.getRange('D4:H9').setBorder(true,true,true,true,true,true,'#DADCE0',SpreadsheetApp.BorderStyle.SOLID);
 }
 
@@ -821,6 +832,159 @@ function sdsdUpdateSummaryAfterBatch_(batch, guard) {
   }catch(e){}
 }
 
+function sdsdSetIndividualDoctorPackageState_(state) {
+  const props = PropertiesService.getDocumentProperties();
+  const obj = state || {};
+  props.setProperty('SDSD_INDIVIDUAL_DOCTOR_PACKAGE_STATUS', String(obj.status || ''));
+  props.setProperty('SDSD_INDIVIDUAL_DOCTOR_PACKAGE_BATCH_ID', String(obj.batchId || ''));
+  props.setProperty('SDSD_INDIVIDUAL_DOCTOR_PACKAGE_FILE_URL', String(obj.fileUrl || ''));
+  props.setProperty('SDSD_INDIVIDUAL_DOCTOR_PACKAGE_FILE_NAME', String(obj.fileName || ''));
+  props.setProperty('SDSD_INDIVIDUAL_DOCTOR_PACKAGE_CASE_COUNT', String(obj.caseCount || 0));
+  props.setProperty('SDSD_INDIVIDUAL_DOCTOR_PACKAGE_AT', new Date().toISOString());
+}
+
+function sdsdGetIndividualDoctorPackageState_() {
+  const props = PropertiesService.getDocumentProperties();
+  return {
+    status: String(props.getProperty('SDSD_INDIVIDUAL_DOCTOR_PACKAGE_STATUS') || ''),
+    batchId: String(props.getProperty('SDSD_INDIVIDUAL_DOCTOR_PACKAGE_BATCH_ID') || ''),
+    fileUrl: String(props.getProperty('SDSD_INDIVIDUAL_DOCTOR_PACKAGE_FILE_URL') || ''),
+    fileName: String(props.getProperty('SDSD_INDIVIDUAL_DOCTOR_PACKAGE_FILE_NAME') || ''),
+    caseCount: Number(props.getProperty('SDSD_INDIVIDUAL_DOCTOR_PACKAGE_CASE_COUNT') || 0),
+    at: String(props.getProperty('SDSD_INDIVIDUAL_DOCTOR_PACKAGE_AT') || '')
+  };
+}
+
+function sdsdClearIndividualDoctorPackageState_() {
+  const props = PropertiesService.getDocumentProperties();
+  [
+    'SDSD_INDIVIDUAL_DOCTOR_PACKAGE_STATUS',
+    'SDSD_INDIVIDUAL_DOCTOR_PACKAGE_BATCH_ID',
+    'SDSD_INDIVIDUAL_DOCTOR_PACKAGE_FILE_URL',
+    'SDSD_INDIVIDUAL_DOCTOR_PACKAGE_FILE_NAME',
+    'SDSD_INDIVIDUAL_DOCTOR_PACKAGE_CASE_COUNT',
+    'SDSD_INDIVIDUAL_DOCTOR_PACKAGE_AT'
+  ].forEach(k => props.deleteProperty(k));
+}
+
+function sdsdGetCompletedIndividualUrls_() {
+  const raw = String(
+    PropertiesService.getDocumentProperties().getProperty('SDSD_INDIVIDUAL_DOCTOR_COMPLETED_URLS') || ''
+  );
+  if (!raw) return {};
+  try {
+    const arr = JSON.parse(raw);
+    const map = {};
+    (Array.isArray(arr) ? arr : []).forEach(url => {
+      const normalized = sdsdNormalizeUrl_(url);
+      if (normalized) map[normalized] = true;
+    });
+    return map;
+  } catch (e) {
+    return {};
+  }
+}
+
+function sdsdAddCompletedIndividualUrls_(urls) {
+  const props = PropertiesService.getDocumentProperties();
+  const map = sdsdGetCompletedIndividualUrls_();
+  (urls || []).forEach(url => {
+    const normalized = sdsdNormalizeUrl_(url);
+    if (normalized) map[normalized] = true;
+  });
+  props.setProperty('SDSD_INDIVIDUAL_DOCTOR_COMPLETED_URLS', JSON.stringify(Object.keys(map)));
+}
+
+function sdsdCurrentSelectedCaseUrls_() {
+  const sh = SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.selectedCases);
+  if (!sh || sh.getLastRow() < 2) return [];
+  const values = sh.getDataRange().getValues();
+  const headers = values[0].map(String);
+  const idx = {};
+  headers.forEach((h,i) => idx[h] = i);
+  const urlIdx = idx['URL'];
+  if (urlIdx == null) return [];
+  return values.slice(1)
+    .map(r => String(r[urlIdx] || ''))
+    .filter(Boolean);
+}
+
+function sdsdMarkCurrentIndividualBatchHandedOff_() {
+  const sh = SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.selectedCases);
+  const urls = sdsdCurrentSelectedCaseUrls_();
+  if (urls.length) sdsdAddCompletedIndividualUrls_(urls);
+
+  if (sh && sh.getLastRow() >= 2) {
+    const values = sh.getDataRange().getValues();
+    const headers = values[0].map(String);
+    const idx = {};
+    headers.forEach((h,i) => idx[h] = i);
+    const refIdx = idx['Referral Status'];
+    const pkgIdx = idx['Case Package Status'];
+
+    for (let i=1; i<values.length; i++) {
+      if (refIdx != null) values[i][refIdx] = 'HANDED_OFF_TO_SBM';
+      if (pkgIdx != null) values[i][pkgIdx] = 'HANDED_OFF_TO_SBM';
+    }
+    sh.getRange(2, 1, values.length - 1, headers.length).setValues(values.slice(1));
+  }
+
+  sdsdClearIndividualDoctorPackageState_();
+  try { sdsdRefreshSelectedCasesView_(); } catch (e) {}
+  try { sdsdRenderHome_(); } catch (e) {}
+
+  return urls.length;
+}
+
+function sdsdPendingSelectedCaseCount_() {
+  const sh = SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.selectedCases);
+  if (!sh || sh.getLastRow() < 2) return 0;
+  const values = sh.getDataRange().getDisplayValues();
+  const headers = values[0].map(String);
+  const refIdx = headers.indexOf('Referral Status');
+  if (refIdx < 0) return values.length - 1;
+
+  return values.slice(1).filter(r => {
+    if (!r.some(v => String(v || '').trim() !== '')) return false;
+    return String(r[refIdx] || '') !== 'HANDED_OFF_TO_SBM';
+  }).length;
+}
+
+function sdsdShowIndividualDoctorResultWaiting_() {
+  const ui = SpreadsheetApp.getUi();
+  const state = sdsdGetIndividualDoctorPackageState_();
+  const detail = state.fileName
+    ? `\n\n生成済みPackage: ${state.fileName}`
+    : '';
+
+  const answer = ui.alert(
+    'Doctor結果をSBMへ登録',
+    '個別精密診断Packageは生成済みです。\n\n' +
+    'SIMS Doctorから返った各記事の診断結果JSONは、DiagnosisではなくSIMS-Blog-Managerへ登録してください。' +
+    detail + '\n\n' +
+    'Doctor結果のSBMへの登録は完了しましたか？',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (answer !== ui.Button.YES) {
+    ui.alert(
+      'Doctor結果待ちです。\n\n' +
+      'SIMS Doctorの回答から各記事の診断結果JSONをSIMS-Blog-Managerへ登録してください。\n' +
+      '登録が終わったら、もう一度「▶ 次に進む（Diagnosisに任せる）」を実行してください。'
+    );
+    return false;
+  }
+
+  const count = sdsdMarkCurrentIndividualBatchHandedOff_();
+  ui.alert(
+    '個別精密診断の引き渡しを完了として記録しました。\n\n' +
+    `SBMへ引き渡し済み: ${count}記事\n\n` +
+    '同じ記事は、この診断セッションでは個別精密診断の対象として再選定しません。\n' +
+    '続きは「▶ 次に進む（Diagnosisに任せる）」で進められます。'
+  );
+  return true;
+}
+
 function sdsdUpdateSummaryAfterPackage_(caseCount, fileUrl) {
   const sh=SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.summary);
   if(!sh)return;
@@ -1129,6 +1293,13 @@ function sdsdProceedIndividualPrecisionDiagnosis(){
 
     sdsdProgress_(4,4,'Doctor精密診断Packageを生成しています');
     const exported=sdsdExportDoctorCasePackageZip({silent:true});
+    sdsdSetIndividualDoctorPackageState_({
+      status:'WAITING_DOCTOR_RESULT',
+      batchId:sdsdGetActiveBatchId_(),
+      fileUrl:exported.fileUrl,
+      fileName:exported.fileName,
+      caseCount:exported.caseCount
+    });
     sdsdUpdateSummaryAfterPackage_(exported.caseCount,exported.fileUrl);
     try{sdsdRefreshSelectedCasesView_();}catch(e){}
     try{sdsdRenderHome_();}catch(e){}
@@ -1150,8 +1321,10 @@ function sdsdProceedIndividualPrecisionDiagnosis(){
 
 
 function sdsdEligibleIndividualPrecisionCount_(){
+  const completed=sdsdGetCompletedIndividualUrls_();
   const rows=sdsdCandidateRowsFromSheet_();
   return rows.filter(r =>
+    !completed[sdsdNormalizeUrl_(r.url)] &&
     String(r.guard||'')==='PASS' &&
     String(r.ownership||'')==='DOCTOR_OWNED' &&
     (String(r.priority||'')==='A1_CANDIDATE' || String(r.priority||'')==='A2_CANDIDATE')
@@ -1179,9 +1352,15 @@ function sdsdProceedNextGuided(){
       return;
     }
 
-    // RC9.3.1: keep the guided action consistent with Site Diagnosis Detail.
-    // When A1/A2 individual precision candidates are currently eligible,
-    // they take precedence over stale/parallel site-wide additional-evidence state.
+    // Individual Doctor Package already generated: do not regenerate it.
+    // Wait for Doctor result registration before selecting/building another batch.
+    const individualPackage=sdsdGetIndividualDoctorPackageState_();
+    if(individualPackage.status==='WAITING_DOCTOR_RESULT'){
+      sdsdShowIndividualDoctorResultWaiting_();
+      return;
+    }
+
+    // A1/A2 individual precision candidates take precedence while no package is waiting.
     const individualEligible=sdsdEligibleIndividualPrecisionCount_();
     if(individualEligible>0){
       sdsdProceedIndividualPrecisionDiagnosis();
@@ -2050,11 +2229,14 @@ function sdsdBuildTreatmentBatch(options) {
   const articleCount = rows.length;
   const capacity = sdsdTreatmentCapacity_(articleCount);
 
+  const completedIndividualUrls = sdsdGetCompletedIndividualUrls_();
   const eligible = rows.filter(r => {
+    const normalizedUrl = sdsdNormalizeUrl_(String(r[idx['Normalized URL']] || ''));
     const p = String(r[idx['Priority Candidate']] || '');
     const guard = String(r[idx['Recent Treatment Guard']] || '');
     const ownership = String(r[idx['Ownership']] || '');
     return (
+      !completedIndividualUrls[normalizedUrl] &&
       guard === 'PASS' &&
       ownership === 'DOCTOR_OWNED' &&
       (p === 'A1_CANDIDATE' || p === 'A2_CANDIDATE')
@@ -2283,6 +2465,13 @@ const SDSD_SESSION_PROP_KEYS_ = Object.freeze([
   'SDSD_LAST_EVIDENCE_FILE_ID',
   'SDSD_ACTIVE_BATCH_ID',
   'SDSD_LAST_SITE_WIDE_RESULT_AT',
+  'SDSD_INDIVIDUAL_DOCTOR_COMPLETED_URLS',
+  'SDSD_INDIVIDUAL_DOCTOR_PACKAGE_AT',
+  'SDSD_INDIVIDUAL_DOCTOR_PACKAGE_CASE_COUNT',
+  'SDSD_INDIVIDUAL_DOCTOR_PACKAGE_FILE_NAME',
+  'SDSD_INDIVIDUAL_DOCTOR_PACKAGE_FILE_URL',
+  'SDSD_INDIVIDUAL_DOCTOR_PACKAGE_BATCH_ID',
+  'SDSD_INDIVIDUAL_DOCTOR_PACKAGE_STATUS',
   'SDSD_SITE_WIDE_REGISTER_STAGE',
   'SDSD_SITE_WIDE_REGISTER_DETAIL',
   'SDSD_SITE_WIDE_REGISTER_AT'
@@ -2331,25 +2520,41 @@ function sdsdGetCurrentSession_() {
 }
 
 function sdsdSessionWorkSummary_() {
-  const selected = sdsdSheetDataRowCount_(SDSD_CONFIG.sheets.selectedCases);
+  const selected = sdsdPendingSelectedCaseCount_();
   const opportunityCases = sdsdSheetDataRowCount_(SDSD_CONFIG.sheets.opportunityCases);
   const candidates = sdsdSheetDataRowCount_(SDSD_CONFIG.sheets.candidates);
 
   let actionableTreatment = 0;
   let additionalEvidence = 0;
-  const sh = SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.treatmentPlan);
-  if (sh && sh.getLastRow() >= 2) {
-    const vals = sh.getDataRange().getDisplayValues();
-    const headers = vals[0].map(x => String(x || '').trim());
-    const nextIdx = headers.indexOf('次の処置');
-    const stateIdx = headers.indexOf('状態');
-    vals.slice(1).forEach(r => {
-      if (!r.some(v => String(v || '').trim() !== '')) return;
-      const next = nextIdx >= 0 ? String(r[nextIdx] || '') : '';
-      const state = stateIdx >= 0 ? String(r[stateIdx] || '') : '';
-      if (/Writer|Merge|Creator/.test(next)) actionableTreatment++;
-      if (state.indexOf('追加確認待ち') >= 0 || next.indexOf('追加Evidence') >= 0) additionalEvidence++;
+
+  // When a stored Doctor site-wide result exists, use the same NEEDS_EVIDENCE
+  // predicate that the precision-package exporter uses. This keeps Home,
+  // guided routing, and package selection in sync.
+  let stored = null;
+  try { stored = sdsdReadStoredSiteWideResult_(); } catch (e) { stored = null; }
+
+  if (stored && Array.isArray(stored.diagnosis_cases)) {
+    additionalEvidence = sdsdNeedsEvidenceCaseCount_();
+    stored.diagnosis_cases.forEach(c => {
+      const route = String(c.route_to || '');
+      if (/^(WRITER|MERGE|CREATOR)$/.test(route)) actionableTreatment++;
     });
+  } else {
+    // Compatibility fallback for legacy sessions that only have the treatment-plan sheet.
+    const sh = SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.treatmentPlan);
+    if (sh && sh.getLastRow() >= 2) {
+      const vals = sh.getDataRange().getDisplayValues();
+      const headers = vals[0].map(x => String(x || '').trim());
+      const nextIdx = headers.indexOf('次の処置');
+      const stateIdx = headers.indexOf('状態');
+      vals.slice(1).forEach(r => {
+        if (!r.some(v => String(v || '').trim() !== '')) return;
+        const next = nextIdx >= 0 ? String(r[nextIdx] || '') : '';
+        const state = stateIdx >= 0 ? String(r[stateIdx] || '') : '';
+        if (/Writer|Merge|Creator/.test(next)) actionableTreatment++;
+        if (state.indexOf('追加確認待ち') >= 0 || next.indexOf('追加Evidence') >= 0) additionalEvidence++;
+      });
+    }
   }
 
   return {
@@ -4830,14 +5035,19 @@ function sdsdReadStoredSiteWideResult_() {
   return obj;
 }
 
-function sdsdPrecisionClusterCases_() {
+function sdsdNeedsEvidenceCases_() {
   const obj = sdsdReadStoredSiteWideResult_();
-  return (obj.diagnosis_cases || [])
-    .filter(c =>
-      String(c.route_to || '') === 'NEEDS_EVIDENCE' &&
-      String(c.doctor_decision || '') === 'ADDITIONAL_EVIDENCE_REQUIRED'
-    )
-    .slice(0, 5);
+  return (obj.diagnosis_cases || []).filter(c =>
+    String(c.route_to || '') === 'NEEDS_EVIDENCE'
+  );
+}
+
+function sdsdNeedsEvidenceCaseCount_() {
+  return sdsdNeedsEvidenceCases_().length;
+}
+
+function sdsdPrecisionClusterCases_() {
+  return sdsdNeedsEvidenceCases_().slice(0, 5);
 }
 
 function sdsdEvidenceRowsForUrl_(sheetName, url) {
@@ -4929,7 +5139,11 @@ function sdsdExportPriorityPrecisionClusterPackage() {
     const cases = sdsdPrecisionClusterCases_();
 
     if (!cases.length) {
-      ui.alert('追加Evidence精密診断の優先クラスタはありません。');
+      ui.alert(
+        '現在、追加Evidence精密診断へ送る案件はありません。\n\n' +
+        'Homeを更新して「次に行うこと」を確認してください。'
+      );
+      try { sdsdRenderHome_(); } catch (e) {}
       return;
     }
 

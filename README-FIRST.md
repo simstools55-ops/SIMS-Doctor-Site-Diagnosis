@@ -1,4 +1,4 @@
-# SIMS Doctor Site Diagnosis v0.5.0
+# SIMS Doctor Site Diagnosis v0.5.3
 
 SIMS Doctor Site Diagnosis は、Collectorで収集したEvidenceを読み込み、サイト全体の診断、個別精密診断、横断診断、Doctorへの引き渡しまでを案内する診断ワークスペースです。
 
@@ -51,18 +51,17 @@ Site Diagnosisは、1つのスプレッドシートで1サイトずつ診断す�
 
 から個別処理を実行できます。
 
-## v0.5.0の主な変更
+## v0.5.3の主な変更
 
-- 通常操作を `▶ 次に進む（Diagnosisに任せる）` 中心へ簡素化
-- 確認用メニューを `確認する` に集約
-- Case EnrichmentのSpreadsheet書込みを一括化
-- Query Evidenceの重複読込みを削減
-- Final GuardのSpreadsheet書込みを一括化
-- Home・ダイアログの古いメニュー案内を現行操作へ統一
+- Homeの「詳しい診断が必要」件数と追加Evidence精密診断Packageの選定条件を統一
+- `route_to = NEEDS_EVIDENCE` の案件を共通判定として扱い、古い `doctor_decision = ADDITIONAL_EVIDENCE_REQUIRED` 固定条件を廃止
+- 追加Evidence精密診断Packageは従来どおり最大5クラスタまで
+- 対象0件時はHomeを更新し、古い件数表示との矛盾を残さない
+- v0.5.2のDoctor→SBM引き渡し、再選定防止、Homeバージョン表示を維持
 - 診断アルゴリズム、Treatment判定、`maxPerRun = 3`、分割・再開方式は変更なし
 
 ## 更新時に置き換えるファイル
 
 既存のApps Script環境では、今回コード変更があるのは `Code.gs` です。
 
-配布物の `VERSION`、`README-FIRST.md`、`CHANGELOG.md` もv0.5.0へ更新されています。`appsscript.json` と `SITE-WIDE-RESULT-CONTRACT-V1.md` は内容変更なしです。
+配布物の `VERSION`、`README-FIRST.md`、`CHANGELOG.md` もv0.5.3へ更新されています。`appsscript.json` と `SITE-WIDE-RESULT-CONTRACT-V1.md` は内容変更なしです。
