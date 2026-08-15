@@ -1,3 +1,14 @@
+# v0.4.0-RC9
+
+- Added Diagnosis Home with two primary workflows and next-action guidance.
+- Reorganized menus around user workflow instead of internal functions.
+- Replaced Evidence URL/file-ID input with a Collector-style Google Drive folder/file picker.
+- Added pre-import Evidence metadata preview (site name, URL, generated time, collection period).
+- Persist site_name/site_url from Collector manifest into the diagnosis session.
+- Added `script.container.ui` OAuth scope for the Drive picker dialog.
+- Preserved existing diagnosis/scoring logic and RC8 one-site session lifecycle.
+- Existing `SIMS_DOCTOR_SITE_WIDE_RESULT_V1` and precision result support retained.
+
 # v0.4.0-RC6 Single-Code
 
 - RC5-HF-SITE-WIDE-PRECISION-RESULT の現行31個の `.gs` を `Code.gs` 1本へ統合。

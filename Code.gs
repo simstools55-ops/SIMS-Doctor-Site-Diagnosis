@@ -1,10 +1,11 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.4.0-RC8';
+const SDSD_VERSION = '0.4.0-RC9';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
+    home: 'Diagnosis Home',
     evidencePageSummary: '_SDSD_PAGE_SUMMARY',
     evidencePageWeekly: '_SDSD_PAGE_WEEKLY',
     evidencePageQuery: '_SDSD_PAGE_QUERY_TOP',
@@ -34,54 +35,118 @@ const SDSD_CONFIG = Object.freeze({
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
 
-  const precisionMenu = ui.createMenu('個別記事の精密診断')
-    .addItem('1. Doctorへ送る記事を選ぶ', 'sdsdCreateProductTreatmentBatch')
-    .addItem('2. 選定記事を見る', 'sdsdOpenSelectedCases')
-    .addItem('3. Doctor精密診断Packageを生成', 'sdsdCreateProductCasePackage');
-
-  const siteWideMenu = ui.createMenu('サイト横断の診断・治療')
-    .addItem('1. 改善機会を診断', 'sdsdRunSiteOpportunityDiagnosis')
-    .addItem('2. Doctor診断案件を作成', 'sdsdBuildSiteOpportunityCases')
-    .addItem('3. 診断案件を見る', 'sdsdOpenSiteOpportunityCases')
-    .addItem('4. Doctor Packageを生成', 'sdsdExportSiteWideDoctorPackage')
+  const wholeSiteMenu = ui.createMenu('1. サイト全体を診断する')
+    .addItem('Evidence Packageを読み込む', 'sdsdImportEvidencePackageZip')
+    .addItem('サイト診断を実行', 'sdsdRunProductDiagnosis')
+    .addItem('診断結果を見る', 'sdsdOpenSiteSummary')
+    .addItem('診断候補を見る', 'sdsdOpenCandidates')
     .addSeparator()
-    .addItem('5. Doctor診断結果を登録', 'sdsdRegisterSiteWideDoctorResult')
-    .addItem('6. サイト治療計画を見る', 'sdsdOpenTreatmentPlan')
-    .addSeparator()
-    .addItem('7. 追加Evidence Packageを生成', 'sdsdExportPriorityPrecisionClusterPackage')
-    .addItem('8. 選択中のMerge紹介状を作成', 'sdsdCreateMergeReferralFromSelectedTreatment');
+    .addItem('横断診断：改善機会を診断', 'sdsdRunSiteOpportunityDiagnosis')
+    .addItem('横断診断：Doctor案件を作成', 'sdsdBuildSiteOpportunityCases')
+    .addItem('横断診断：Doctor Packageを生成', 'sdsdExportSiteWideDoctorPackage')
+    .addItem('横断診断：Doctor結果を登録', 'sdsdRegisterSiteWideDoctorResult');
 
-  const sessionMenu = ui.createMenu('診断セッション')
+  const treatmentMenu = ui.createMenu('2. 見つかった問題を処置する')
+    .addItem('個別記事：Doctorへ送る記事を選ぶ', 'sdsdCreateProductTreatmentBatch')
+    .addItem('個別記事：選定記事を見る', 'sdsdOpenSelectedCases')
+    .addItem('個別記事：Doctor精密診断Packageを生成', 'sdsdCreateProductCasePackage')
+    .addSeparator()
+    .addItem('横断診断：サイト治療計画を見る', 'sdsdOpenTreatmentPlan')
+    .addItem('横断診断：追加Evidence Packageを生成', 'sdsdExportPriorityPrecisionClusterPackage')
+    .addItem('横断診断：選択中のMerge紹介状を作成', 'sdsdCreateMergeReferralFromSelectedTreatment');
+
+  const otherMenu = ui.createMenu('その他・管理')
     .addItem('現在の診断状況を確認', 'sdsdShowCurrentSessionStatus')
-    .addItem('現在の診断を終了', 'sdsdEndCurrentDiagnosisSession');
-
-  const setupMenu = ui.createMenu('初期設定・データ準備')
-    .addItem('初期設定を実行', 'sdsdInitialize')
+    .addItem('現在の診断を終了', 'sdsdEndCurrentDiagnosisSession')
     .addSeparator()
+    .addItem('初期設定を実行', 'sdsdInitialize')
     .addItem('Article Masterの取込案内', 'sdsdArticleMasterImportHelp')
-    .addItem('SBM改善履歴の取込案内', 'sdsdImportHistoryHelp');
-
-  const maintenanceMenu = ui.createMenu('保守・検証')
-    .addItem('Query Evidenceを診断', 'sdsdDiagnoseQueryEvidenceInput')
-    .addItem('週次トレンド検証表を作成', 'sdsdValidateWeeklyTrends')
-    .addItem('優先度検証表を作成', 'sdsdValidateFinalPriorities')
+    .addItem('SBM改善履歴の取込案内', 'sdsdImportHistoryHelp')
     .addSeparator()
     .addItem('内部シートを表示', 'sdsdShowInternalSheets')
     .addItem('内部シートを隠す', 'sdsdHideInternalSheets');
 
   ui.createMenu('SIMS Doctor Site Diagnosis')
-    .addItem('1. Evidence Packageを読み込む', 'sdsdImportEvidencePackageZip')
-    .addItem('2. サイト診断を実行', 'sdsdRunProductDiagnosis')
-    .addItem('3. 診断結果を見る', 'sdsdOpenSiteSummary')
-    .addItem('4. 診断候補を見る', 'sdsdOpenCandidates')
+    .addItem('Homeを開く', 'sdsdOpenHome')
     .addSeparator()
-    .addSubMenu(sessionMenu)
-    .addSubMenu(precisionMenu)
-    .addSubMenu(siteWideMenu)
+    .addSubMenu(wholeSiteMenu)
+    .addSubMenu(treatmentMenu)
     .addSeparator()
-    .addSubMenu(setupMenu)
-    .addSubMenu(maintenanceMenu)
+    .addSubMenu(otherMenu)
     .addToUi();
+
+  try {
+    sdsdRenderHome_();
+    const home=SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.home);
+    if(home) SpreadsheetApp.getActive().setActiveSheet(home);
+  } catch(e) {}
+}
+
+
+function sdsdOpenHome(){
+  sdsdRenderHome_();
+  const sh=SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.home);
+  if(sh) SpreadsheetApp.getActive().setActiveSheet(sh);
+}
+
+function sdsdNextAction_(session,work){
+  if(!session.active)return 'Evidence Packageを読み込んで、サイト診断を開始してください。';
+  const props=PropertiesService.getDocumentProperties();
+  const registerStage=String(props.getProperty('SDSD_SITE_WIDE_REGISTER_STAGE')||'');
+  if(registerStage==='WAITING_INPUT')return 'Doctorの横断診断結果を登録してください。';
+  if(work.additionalEvidence>0)return '追加Evidenceが必要な案件を精密診断してください。';
+  if(work.actionableTreatment>0)return '治療計画を確認し、Writer / Merge / Creatorへ引き渡してください。';
+  if(work.opportunityCases>0)return 'Doctor Packageを生成し、サイト横断診断を依頼してください。';
+  if(work.candidates>0)return '診断候補を確認し、個別精密診断またはサイト横断診断へ進んでください。';
+  return 'サイト診断を実行してください。';
+}
+
+function sdsdRenderHome_(){
+  sdsdProductEnsureSheets_();
+  const ss=SpreadsheetApp.getActive();
+  let sh=ss.getSheetByName(SDSD_CONFIG.sheets.home);
+  if(!sh)sh=ss.insertSheet(SDSD_CONFIG.sheets.home,0);
+  sh.showSheet();
+  sh.clear();
+
+  const session=sdsdGetCurrentSession_();
+  const work=sdsdSessionWorkSummary_();
+  const next=sdsdNextAction_(session,work);
+  const siteLabel=session.active?(session.siteName||session.siteId||session.host||'判定できません'):'未読込';
+
+  sh.getRange('A1:H1').merge().setValue('SIMS Doctor | Site Diagnosis');
+  sh.getRange('A2:H2').merge().setValue('サイト全体を診断し、見つかった問題を詳しく調べて治療へつなぎます。');
+
+  sh.getRange('A4:B7').setValues([
+    ['現在の診断サイト',siteLabel],
+    ['Evidence',session.evidenceFileName||'未読込'],
+    ['診断候補',work.candidates+'件'],
+    ['要確認作業',work.pendingTotal+'件']
+  ]);
+
+  sh.getRange('A9:H9').merge().setValue('① サイト全体を診断する');
+  sh.getRange('A10:H10').merge().setValue('Evidenceを読み込む → サイト診断 → 診断候補を確認 → 必要に応じてDoctor横断診断');
+  sh.getRange('A12:H12').merge().setValue('② 見つかった問題を処置する');
+  sh.getRange('A13:H13').merge().setValue('個別精密診断 / 追加Evidence → Doctor → Writer / Merge / Creator → SBM');
+  sh.getRange('A15:H15').merge().setValue('次に行うこと');
+  sh.getRange('A16:H17').merge().setValue(next);
+
+  sh.getRange('A19:H19').merge().setValue('状態の見方');
+  sh.getRange('A20:H20').merge().setValue('青：通常の操作　　緑：完了　　黄：確認・Evidence待ち　　赤：エラー　　灰：現在操作不要');
+
+  sh.getRange('A1:H1').setBackground('#185ABC').setFontColor('#FFFFFF').setFontWeight('bold').setFontSize(18);
+  sh.getRange('A2:H2').setBackground('#E8F0FE').setFontColor('#174EA6').setFontSize(11);
+  ['A9:H9','A12:H12','A15:H15','A19:H19'].forEach(r=>sh.getRange(r).setBackground('#D2E3FC').setFontColor('#174EA6').setFontWeight('bold'));
+  sh.getRange('A16:H17').setBackground('#FFF4CE').setFontWeight('bold').setFontSize(12);
+  sh.getRange('A4:A7').setBackground('#F1F3F4').setFontWeight('bold');
+  sh.getRange('B4:B7').setBackground('#FFFFFF');
+  if(session.active)sh.getRange('B4').setBackground('#E6F4EA').setFontColor('#137333').setFontWeight('bold');
+  sh.getRange('A1:H20').setWrap(true).setVerticalAlignment('middle');
+  sh.setFrozenRows(2);
+  sh.setColumnWidth(1,170); sh.setColumnWidth(2,330);
+  for(let c=3;c<=8;c++)sh.setColumnWidth(c,95);
+  sh.setRowHeight(1,34); sh.setRowHeight(2,30); sh.setRowHeights(9,12,30);
+  sh.setHiddenGridlines(true);
 }
 
 function sdsdInitialize() {
@@ -1773,6 +1838,8 @@ function sdsdBuildEvidenceMap_() {
 const SDSD_SESSION_PROP_KEYS_ = Object.freeze([
   'SDSD_SESSION_STATUS',
   'SDSD_SESSION_SITE_ID',
+  'SDSD_SESSION_SITE_NAME',
+  'SDSD_SESSION_SITE_URL',
   'SDSD_SESSION_HOST',
   'SDSD_SESSION_EVIDENCE_FILE_ID',
   'SDSD_SESSION_EVIDENCE_FILE_NAME',
@@ -1817,6 +1884,8 @@ function sdsdGetCurrentSession_() {
     active: status === 'ACTIVE' || status === 'ACTIVE_LEGACY',
     status: status,
     siteId: String(props.getProperty('SDSD_SESSION_SITE_ID') || inferred.siteId || ''),
+    siteName: String(props.getProperty('SDSD_SESSION_SITE_NAME') || ''),
+    siteUrl: String(props.getProperty('SDSD_SESSION_SITE_URL') || inferred.url || ''),
     host: String(props.getProperty('SDSD_SESSION_HOST') || inferred.host || ''),
     evidenceFileId: String(props.getProperty('SDSD_SESSION_EVIDENCE_FILE_ID') || props.getProperty('SDSD_LAST_EVIDENCE_FILE_ID') || ''),
     evidenceFileName: String(props.getProperty('SDSD_SESSION_EVIDENCE_FILE_NAME') || ''),
@@ -1955,11 +2024,13 @@ function sdsdEndCurrentDiagnosisSession() {
   );
 }
 
-function sdsdRegisterDiagnosisSession_(fileId, fileName) {
+function sdsdRegisterDiagnosisSession_(fileId, fileName, packageMeta) {
   const props = PropertiesService.getDocumentProperties();
   const info = sdsdInferCurrentEvidenceSite_();
   props.setProperty('SDSD_SESSION_STATUS', 'ACTIVE');
-  props.setProperty('SDSD_SESSION_SITE_ID', String(info.siteId || ''));
+  props.setProperty('SDSD_SESSION_SITE_ID', String((packageMeta&&packageMeta.siteId)||info.siteId||''));
+  props.setProperty('SDSD_SESSION_SITE_NAME', String((packageMeta&&packageMeta.siteName)||''));
+  props.setProperty('SDSD_SESSION_SITE_URL', String((packageMeta&&packageMeta.siteUrl)||info.url||''));
   props.setProperty('SDSD_SESSION_HOST', String(info.host || ''));
   props.setProperty('SDSD_SESSION_EVIDENCE_FILE_ID', String(fileId || ''));
   props.setProperty('SDSD_SESSION_EVIDENCE_FILE_NAME', String(fileName || ''));
@@ -1997,101 +2068,144 @@ function sdsdExtractDriveFileId_(text) {
   return '';
 }
 
-function sdsdImportEvidencePackageZip() {
+function sdsdImportEvidencePackageZip(){
   sdsdProductEnsureSheets_();
+  const ui=SpreadsheetApp.getUi();
+  try{sdsdAssertNoActiveDiagnosisSessionBeforeImport_();}
+  catch(e){ui.alert(String(e&&e.message?e.message:e));return;}
 
-  const ui = SpreadsheetApp.getUi();
-  try {
-    sdsdAssertNoActiveDiagnosisSessionBeforeImport_();
-  } catch (e) {
-    ui.alert(String(e && e.message ? e.message : e));
-    return;
-  }
-  const prompt = ui.prompt(
-    `SIMS Doctor Site Diagnosis ${SDSD_VERSION}`,
-    'Google Drive上のCollector Evidence ZIPのURL、またはファイルIDを入力してください。',
-    ui.ButtonSet.OK_CANCEL
-  );
-  if (prompt.getSelectedButton() !== ui.Button.OK) return;
-
-  const fileId = sdsdExtractDriveFileId_(prompt.getResponseText());
-  if (!fileId) {
-    ui.alert('DriveファイルURLまたはファイルIDを認識できませんでした。');
-    return;
-  }
-
-  const file = DriveApp.getFileById(fileId);
-  const name = file.getName();
-  if (!/\.zip$/i.test(name)) {
-    throw new Error(`ZIPファイルではありません: ${name}`);
-  }
-
-  const blobs = Utilities.unzip(file.getBlob());
-  const fileMap = {};
-  blobs.forEach(blob => {
-    const n = String(blob.getName() || '').split('/').pop();
-    if (n) fileMap[n] = blob;
-  });
-
-  const required = [
-    {file:'page_summary.csv', sheet:SDSD_CONFIG.sheets.evidencePageSummary},
-    {file:'page_weekly.csv', sheet:SDSD_CONFIG.sheets.evidencePageWeekly},
-    {file:'page_query_top.csv', sheet:SDSD_CONFIG.sheets.evidencePageQuery}
-  ];
-
-  const missing = required.filter(x => !fileMap[x.file]).map(x => x.file);
-  if (missing.length) {
-    throw new Error(`Evidence ZIPに必要ファイルがありません: ${missing.join(', ')}`);
-  }
-
-  const report = [];
-  required.forEach(x => {
-    const text = fileMap[x.file].getDataAsString('UTF-8').replace(/^\uFEFF/, '');
-    const values = Utilities.parseCsv(text);
-
-    if (!values.length) {
-      throw new Error(`${x.file} が空です。`);
-    }
-
-    const sh = SpreadsheetApp.getActive().getSheetByName(x.sheet);
-    sh.clearContents();
-
-    const width = Math.max.apply(null, values.map(r => r.length));
-    const normalized = values.map(r => {
-      const row = r.slice();
-      while (row.length < width) row.push('');
-      return row;
-    });
-
-    sh.getRange(1,1,normalized.length,width).setValues(normalized);
-    report.push({
-      file:x.file,
-      sheet:x.sheet,
-      dataRows:Math.max(normalized.length - 1, 0),
-      columns:width
-    });
-  });
-
-  PropertiesService.getDocumentProperties().setProperty(
-    'SDSD_LAST_EVIDENCE_FILE_ID',
-    fileId
-  );
-  const sessionSite = sdsdRegisterDiagnosisSession_(fileId, name);
-
-  const diag = sdsdEvidenceImportIntegrity_();
-
-  ui.alert(
-    `Evidence Package取込完了\n\n` +
-    `対象サイト: ${sessionSite.siteId || sessionSite.host || '判定できません'}\n` +
-    `ZIP: ${name}\n` +
-    `page_summary: ${report[0].dataRows}行\n` +
-    `page_weekly: ${report[1].dataRows}行\n` +
-    `page_query_top: ${report[2].dataRows}行\n\n` +
-    `Query URL数: ${diag.queryUrlCount}\n` +
-    `Query行数: ${diag.queryRows}\n\n` +
-    `次に「2. サイト診断を実行」を実行してください。`
-  );
+  const root=DriveApp.getRootFolder();
+  const html=HtmlService.createHtmlOutput(sdsdEvidencePickerHtml_({folderId:root.getId(),folderName:'マイドライブ'}))
+    .setWidth(700).setHeight(590);
+  ui.showModalDialog(html,'Evidence Packageを選ぶ');
 }
+
+function sdsdListEvidencePickerFolder(folderId){
+  let folder;
+  try{folder=folderId?DriveApp.getFolderById(folderId):DriveApp.getRootFolder();}
+  catch(e){folder=DriveApp.getRootFolder();}
+  const folders=[],files=[];
+  let it=folder.getFolders(),n=0;
+  while(it.hasNext()&&n<150){const f=it.next();folders.push({id:f.getId(),name:f.getName()});n++;}
+  let fit=folder.getFiles(),m=0;
+  while(fit.hasNext()&&m<300){
+    const f=fit.next(),name=f.getName();
+    if(/\.zip$/i.test(name)&&(/SIMS/i.test(name)||/Evidence/i.test(name)))files.push({id:f.getId(),name:name,updated:f.getLastUpdated().toISOString()});
+    m++;
+  }
+  folders.sort((a,b)=>a.name.localeCompare(b.name,'ja'));
+  files.sort((a,b)=>String(b.updated).localeCompare(String(a.updated)));
+  let parent=null;
+  try{const ps=folder.getParents();if(ps.hasNext()){const p=ps.next();parent={id:p.getId(),name:p.getName()||'マイドライブ'};}}catch(e){}
+  return {id:folder.getId(),name:folder.getName()||'マイドライブ',parent:parent,folders:folders,files:files};
+}
+
+function sdsdInspectEvidenceFile(fileId){
+  const file=DriveApp.getFileById(fileId);
+  if(!/\.zip$/i.test(file.getName()))throw new Error('ZIPファイルではありません。');
+  const blobs=Utilities.unzip(file.getBlob());
+  let manifest=null;
+  blobs.forEach(b=>{if(String(b.getName()||'').split('/').pop()==='manifest.json'){try{manifest=JSON.parse(b.getDataAsString('UTF-8'));}catch(e){}}});
+  const site=manifest&&manifest.site?manifest.site:{};
+  const period=manifest&&manifest.period?manifest.period:{};
+  return {
+    fileId:file.getId(),fileName:file.getName(),
+    siteName:String(site.siteName||site.site_name||''),
+    siteUrl:String(site.siteUrl||site.site_url||site.searchConsoleProperty||''),
+    generatedAt:String((manifest&&manifest.generatedAt)||''),
+    periodLabel:period.days?String(period.days)+'日':(period.start&&period.end?period.start+' ～ '+period.end:''),
+    format:String((manifest&&manifest.format)||'')
+  };
+}
+
+function sdsdImportSelectedEvidence(payload){
+  const fileId=String(payload&&payload.fileId||'');
+  if(!fileId)throw new Error('Evidence Packageが選択されていません。');
+  sdsdAssertNoActiveDiagnosisSessionBeforeImport_();
+  return sdsdImportEvidencePackageById_(fileId);
+}
+
+function sdsdImportEvidencePackageById_(fileId){
+  const file=DriveApp.getFileById(fileId);
+  const name=file.getName();
+  if(!/\.zip$/i.test(name))throw new Error(`ZIPファイルではありません: ${name}`);
+
+  const blobs=Utilities.unzip(file.getBlob()),fileMap={};
+  blobs.forEach(blob=>{const n=String(blob.getName()||'').split('/').pop();if(n)fileMap[n]=blob;});
+  const required=[
+    {file:'page_summary.csv',sheet:SDSD_CONFIG.sheets.evidencePageSummary},
+    {file:'page_weekly.csv',sheet:SDSD_CONFIG.sheets.evidencePageWeekly},
+    {file:'page_query_top.csv',sheet:SDSD_CONFIG.sheets.evidencePageQuery}
+  ];
+  const missing=required.filter(x=>!fileMap[x.file]).map(x=>x.file);
+  if(missing.length)throw new Error(`Evidence ZIPに必要ファイルがありません: ${missing.join(', ')}`);
+
+  let manifest={};
+  if(fileMap['manifest.json']){try{manifest=JSON.parse(fileMap['manifest.json'].getDataAsString('UTF-8'));}catch(e){}}
+  const site=manifest.site||{};
+  const packageMeta={
+    siteName:String(site.siteName||site.site_name||''),
+    siteUrl:String(site.siteUrl||site.site_url||site.searchConsoleProperty||''),
+    siteId:''
+  };
+  if(packageMeta.siteUrl)packageMeta.siteId=sdsdSiteIdFromUrl_(packageMeta.siteUrl);
+
+  const report=[];
+  required.forEach(x=>{
+    const text=fileMap[x.file].getDataAsString('UTF-8').replace(/^\uFEFF/,'');
+    const values=Utilities.parseCsv(text);
+    if(!values.length)throw new Error(`${x.file} が空です。`);
+    const sh=SpreadsheetApp.getActive().getSheetByName(x.sheet);sh.clearContents();
+    const width=Math.max.apply(null,values.map(r=>r.length));
+    const normalized=values.map(r=>{const row=r.slice();while(row.length<width)row.push('');return row;});
+    sh.getRange(1,1,normalized.length,width).setValues(normalized);
+    report.push({file:x.file,sheet:x.sheet,dataRows:Math.max(normalized.length-1,0),columns:width});
+  });
+
+  PropertiesService.getDocumentProperties().setProperty('SDSD_LAST_EVIDENCE_FILE_ID',fileId);
+  const sessionSite=sdsdRegisterDiagnosisSession_(fileId,name,packageMeta);
+  const diag=sdsdEvidenceImportIntegrity_();
+  sdsdRenderHome_();
+  return {
+    ok:true,fileName:name,
+    siteName:packageMeta.siteName||sessionSite.siteId||sessionSite.host||'判定できません',
+    siteUrl:packageMeta.siteUrl||sessionSite.url||'',
+    rows:report[0].dataRows,queryUrlCount:diag.queryUrlCount,queryRows:diag.queryRows,
+    next:'次に「サイト全体を診断する → サイト診断を実行」へ進んでください。'
+  };
+}
+
+function sdsdEvidencePickerHtml_(o){
+  const data=JSON.stringify(o||{}).replace(/</g,'\\u003c');
+  return `<!doctype html><html><head><base target="_top"><style>
+  body{font-family:Arial,"Noto Sans JP",sans-serif;margin:0;background:#f8fafd;color:#202124}.wrap{padding:20px}
+  .hero{background:#185abc;color:#fff;padding:16px 18px;border-radius:10px}.hero h2{margin:0 0 5px;font-size:20px}.hero p{margin:0;font-size:13px}
+  .card{background:#fff;border:1px solid #dadce0;border-radius:10px;margin-top:14px;padding:14px}.bar{display:flex;gap:8px;align-items:center}.where{flex:1;font-weight:bold;color:#174ea6}
+  button{border:1px solid #dadce0;background:#fff;border-radius:6px;padding:8px 12px;cursor:pointer}button.primary{background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:bold}
+  .list{height:235px;overflow:auto;border:1px solid #e0e0e0;border-radius:7px;margin-top:10px}.row{padding:9px 11px;border-bottom:1px solid #f1f3f4;cursor:pointer}.row:hover{background:#f8f9fa}.selected{background:#e8f0fe!important}
+  .meta{margin-top:12px;background:#f8fafd;border-radius:7px;padding:10px;line-height:1.7;font-size:13px}.hint{color:#5f6368;font-size:12px}.err{color:#b3261e;margin-top:8px}.actions{text-align:right;margin-top:12px}
+  </style></head><body><div class="wrap"><div class="hero"><h2>Evidence Packageを読み込む</h2><p>Collectorで作成したZIPを、フォルダを移動して選択します。</p></div>
+  <div class="card"><div class="bar"><button id="up">↑ 上へ</button><div id="where" class="where"></div></div><div id="list" class="list"></div><div class="hint">📁 フォルダをクリックして移動し、📦 Evidence ZIPを選択してください。</div></div>
+  <div id="meta" class="meta">Evidence Packageを選択すると、サイト名・URL・作成日時・収集期間を確認できます。</div><div id="err" class="err"></div>
+  <div class="actions"><button onclick="google.script.host.close()">キャンセル</button> <button id="import" class="primary" disabled>このEvidenceを読み込む</button></div>
+  </div><script>
+  const init=${data};let current=null,selected=null;
+  const esc=s=>String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function fail(e){document.getElementById('err').textContent=e.message||e;}
+  function load(id){document.getElementById('list').innerHTML='<div class="row">読み込み中...</div>';google.script.run.withSuccessHandler(render).withFailureHandler(fail).sdsdListEvidencePickerFolder(id);}
+  function render(d){current=d;document.getElementById('where').textContent=d.name;document.getElementById('up').disabled=!d.parent;const box=document.getElementById('list');box.innerHTML='';
+    d.folders.forEach(f=>{const x=document.createElement('div');x.className='row';x.textContent='📁 '+f.name;x.onclick=()=>load(f.id);box.appendChild(x);});
+    d.files.forEach(f=>{const x=document.createElement('div');x.className='row';x.textContent='📦 '+f.name;x.onclick=()=>choose(f,x);box.appendChild(x);});
+    if(!d.folders.length&&!d.files.length)box.innerHTML='<div class="row">このフォルダにEvidence ZIPはありません。</div>';
+  }
+  function choose(f,el){selected=f;document.querySelectorAll('.selected').forEach(x=>x.classList.remove('selected'));el.classList.add('selected');document.getElementById('import').disabled=true;
+    document.getElementById('meta').textContent='内容を確認しています...';google.script.run.withSuccessHandler(m=>{document.getElementById('meta').innerHTML='<b>'+esc(m.fileName)+'</b><br>サイト名：'+esc(m.siteName||'不明')+'<br>サイトURL：'+esc(m.siteUrl||'不明')+'<br>作成日時：'+esc(m.generatedAt||'不明')+'<br>収集期間：'+esc(m.periodLabel||'不明');document.getElementById('import').disabled=false;}).withFailureHandler(fail).sdsdInspectEvidenceFile(f.id);}
+  document.getElementById('up').onclick=()=>{if(current&&current.parent)load(current.parent.id)};
+  document.getElementById('import').onclick=()=>{if(!selected)return;const b=document.getElementById('import');b.disabled=true;b.textContent='読み込み中...';google.script.run.withSuccessHandler(r=>{document.getElementById('meta').innerHTML='<b style="color:#137333">読み込み完了</b><br>サイト：'+esc(r.siteName)+'<br>'+esc(r.next);setTimeout(()=>google.script.host.close(),1800);}).withFailureHandler(e=>{b.disabled=false;b.textContent='このEvidenceを読み込む';fail(e)}).sdsdImportSelectedEvidence({fileId:selected.id});};
+  load(init.folderId);
+  </script></body></html>`;
+}
+
 
 function sdsdEvidenceImportIntegrity_() {
   const queryMap = sdsdBuildQueryEvidenceMap_();
