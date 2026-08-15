@@ -1,4 +1,4 @@
-# SIMS Doctor Site Diagnosis v0.5.5
+# SIMS Doctor Site Diagnosis v0.5.6
 
 SIMS Doctor Site Diagnosis は、Collectorで収集したEvidenceを読み込み、サイト全体の診断、個別精密診断、横断診断、Doctorへの引き渡しまでを案内する診断ワークスペースです。
 
@@ -50,6 +50,16 @@ Site Diagnosisは、1つのスプレッドシートで1サイトずつ診断す�
 `その他・管理 → 手動・保守操作`
 
 から個別処理を実行できます。
+
+## v0.5.6の主な変更
+
+- 治療方針確定後の「▶ 次に進む」を、サイト治療計画の再表示ではなくSBM引き渡し工程へ接続
+- 最終治療計画から既存SBM v5.10.4互換の `SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1` を生成
+- Writer / Merge / 経過観察をSBMへ渡し、各専門製品への正式紹介状生成はSBMに委譲
+- NO_ACTIONはSBM引き渡し時のみMONITORとして経過観察へ接続し、Doctorの元判断は `source_route_to` に保持
+- Merge案件はDoctorが付与した記事roleを使って統合先／吸収記事を安全に復元し、曖昧なら引き渡しを停止
+- SBM登録完了をDiagnosisへ記録し、Homeを「SBM引き渡し完了」へ更新
+- 新しい独自Contractは追加せず、既存のSite Diagnosis一括結果契約を再利用
 
 ## v0.5.5の主な変更
 

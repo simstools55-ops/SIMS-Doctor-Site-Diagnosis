@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.5.5';
+const SDSD_VERSION = '0.5.6';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -218,10 +218,19 @@ function sdsdHomeGuide_(session,m,work,stored){
       };
     }
     if(work.actionableTreatment>0){
+      const handoffState=sdsdGetSbmHandoffState_();
+      if(handoffState==='COMPLETE'){
+        return {
+          title:'SBMへの診断結果引き渡しは完了しています',
+          reason:'Writer / Mergeへの紹介状作成とその後の経過観察はSIMS-Blog-Managerで続けます。',
+          path:'SIMS-Blog-Manager → SIMS Doctor → 5．Site Diagnosisの処置を進める',
+          tone:'GREEN'
+        };
+      }
       return {
-        title:`治療へ進める案件が${work.actionableTreatment}件あります`,
-        reason:'Doctorの診断で治療方針が決まりました。Writer / Merge / Creatorへ引き渡します。',
-        path:'確認する → サイト治療計画を見る',
+        title:`SBMへ引き渡す治療案件が${work.actionableTreatment}件あります`,
+        reason:'Doctorの診断で治療方針が決まりました。DiagnosisからSBMへ診断結果を渡し、SBMがWriter / Mergeへ正式に振り分けます。',
+        path:'メニュー最上段 → ▶ 次に進む（Diagnosisに任せる）',
         tone:'BLUE'
       };
     }
@@ -1488,6 +1497,189 @@ function sdsdMergePrecisionIntoStoredResult_(precisionNormalized) {
   return merged;
 }
 
+
+function sdsdSbmHandoffRoute_(route) {
+  route = String(route || '').toUpperCase();
+  // SBM's Site Diagnosis bridge treats MONITOR as the non-treatment tracking route.
+  // Preserve NO_ACTION in source_route while handing it to SBM as MONITOR.
+  return route === 'NO_ACTION' ? 'MONITOR' : route;
+}
+
+function sdsdSbmArticleFromTarget_(article) {
+  article = article || {};
+  const url = String(article.article_url || article.url || '').trim();
+  const identity = url ? sdsdArticleIdentityForUrl_(url) : {
+    site_id:'', article_id:'', article_title:'', article_url:'', main_query:''
+  };
+  return {
+    site_id: String(article.site_id || identity.site_id || ''),
+    article_id: String(article.article_id || identity.article_id || ''),
+    article_title: String(
+      article.article_title || article.title || identity.article_title || ''
+    ),
+    article_url: url || String(identity.article_url || ''),
+    role: String(article.role || '')
+  };
+}
+
+function sdsdSbmMergePlanFromCase_(c) {
+  if (c && c.merge_plan) return c.merge_plan;
+
+  const articles = (c && Array.isArray(c.target_articles) ? c.target_articles : [])
+    .map(sdsdSbmArticleFromTarget_)
+    .filter(a => a.article_url);
+
+  let target = null;
+  let source = null;
+
+  articles.forEach(a => {
+    const role = String(a.role || '');
+    if (!target && /維持|軸記事|統合先|PRIMARY|SURVIVOR/i.test(role)) target = a;
+    if (!source && /Merge対象|統合元|吸収|リーク|SOURCE|ABSORB/i.test(role)) source = a;
+  });
+
+  // Only use positional fallback when exactly two articles exist.
+  if ((!target || !source) && articles.length === 2) {
+    target = target || articles[0];
+    source = source || articles[1];
+  }
+
+  if (!target || !source || target.article_url === source.article_url) return null;
+
+  return {
+    target_article: target,
+    source_article: source,
+    redirect_direction: `${source.article_url} → ${target.article_url}`,
+    content_to_absorb: String(c && c.merge_content_to_absorb || '')
+  };
+}
+
+function sdsdBuildSbmSiteDiagnosisHandoff_() {
+  const result = sdsdReadStoredSiteWideResult_();
+  const site = result.site || {};
+  const batchId = String(result.site_diagnosis_batch_id || sdsdSiteWideBatchId_() || '');
+  const clusters = [];
+
+  (result.diagnosis_cases || []).forEach((c, i) => {
+    const sourceRoute = String(c.route_to || '').toUpperCase();
+    if (!sourceRoute || sourceRoute === 'NEEDS_EVIDENCE') return;
+
+    const route = sdsdSbmHandoffRoute_(sourceRoute);
+    const articles = (Array.isArray(c.target_articles) ? c.target_articles : [])
+      .map(sdsdSbmArticleFromTarget_)
+      .filter(a => a.article_url);
+
+    // A representative article is mandatory for the existing SBM bridge.
+    if (!articles.length) return;
+
+    const clusterResult = {
+      diagnosis_theme: String(c.diagnosis_theme || ''),
+      diagnosis_summary: String(c.reason || ''),
+      doctor_decision: String(c.doctor_decision || sourceRoute),
+      confidence: c.confidence,
+      site_impact: String(c.site_impact || ''),
+      treatment_strategy: String(c.treatment_strategy || ''),
+      route_to: route,
+      source_route_to: sourceRoute,
+      articles: articles,
+      allowed_scope: c.treatment_plan && Array.isArray(c.treatment_plan.allowed_scope)
+        ? c.treatment_plan.allowed_scope : [],
+      blocked_scope: c.treatment_plan && Array.isArray(c.treatment_plan.blocked_scope)
+        ? c.treatment_plan.blocked_scope : [],
+      internal_link_recommendations: Array.isArray(c.internal_link_recommendations)
+        ? c.internal_link_recommendations : [],
+      presentation: c.presentation || null
+    };
+
+    if (sourceRoute === 'MERGE') {
+      const mergePlan = sdsdSbmMergePlanFromCase_(c);
+      if (!mergePlan) {
+        throw new Error(
+          `Merge案件の統合方向を安全に確定できません：${c.diagnosis_theme || c.diagnosis_case_id || (i+1)}`
+        );
+      }
+      clusterResult.merge_plan = mergePlan;
+    }
+
+    clusters.push({
+      diagnosis_case_id: String(c.diagnosis_case_id || `SDSD-${i+1}`),
+      site_diagnosis_batch_id: batchId,
+      site_id: String(site.site_id || ''),
+      diagnosis_theme: String(c.diagnosis_theme || ''),
+      workflow_handoff: {
+        next_action: route,
+        handoff_mode: route === 'MONITOR'
+          ? 'RETURN_TO_SBM_FOR_MONITORING'
+          : 'RETURN_TO_SBM_FOR_REFERRAL',
+        allowed_scope: clusterResult.allowed_scope,
+        blocked_scope: clusterResult.blocked_scope
+      },
+      cluster_result: clusterResult
+    });
+  });
+
+  if (!clusters.length) throw new Error('SBMへ引き渡す確定案件がありません。');
+
+  return {
+    format: 'SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1',
+    contract_name: 'SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1',
+    contract_version: '1.0',
+    generated_at: new Date().toISOString(),
+    site_diagnosis_batch_id: batchId,
+    site_id: String(site.site_id || ''),
+    site_name: String(site.site_name || ''),
+    site_url: String(site.site_url || ''),
+    source_system: 'SIMS_DOCTOR_SITE_DIAGNOSIS',
+    target_system: 'SIMS_BLOG_MANAGER',
+    clusters: clusters,
+    workflow: {return_to:'SIMS_BLOG_MANAGER'}
+  };
+}
+
+function sdsdSetSbmHandoffState_(status) {
+  const props = PropertiesService.getDocumentProperties();
+  props.setProperty('SDSD_SBM_HANDOFF_STATUS', String(status || ''));
+  props.setProperty('SDSD_SBM_HANDOFF_AT', new Date().toISOString());
+}
+
+function sdsdGetSbmHandoffState_() {
+  return String(
+    PropertiesService.getDocumentProperties().getProperty('SDSD_SBM_HANDOFF_STATUS') || ''
+  );
+}
+
+function sdsdShowSbmHandoffDialog_() {
+  const ui = SpreadsheetApp.getUi();
+  const obj = sdsdBuildSbmSiteDiagnosisHandoff_();
+  const text = JSON.stringify(obj, null, 2);
+  const encoded = Utilities.base64EncodeWebSafe(text, Utilities.Charset.UTF_8);
+
+  const html =
+    '<!doctype html><html><head><base target="_top"><meta charset="UTF-8"><style>' +
+    'body{font-family:Arial,"Noto Sans JP",sans-serif;padding:18px;background:#f8f9fa;color:#202124}' +
+    'h2{margin:0 0 8px;font-size:18px}.flow{background:#e8f0fe;color:#174ea6;padding:9px 11px;border-radius:7px;font-weight:700;font-size:12px;margin-bottom:10px}' +
+    '.note{font-size:12px;line-height:1.7;color:#5f6368;margin-bottom:10px}' +
+    'textarea{box-sizing:border-box;width:100%;height:350px;padding:10px;font:12px/1.45 monospace;white-space:pre;border:1px solid #bdc1c6;border-radius:7px;background:#fff}' +
+    '.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}button{padding:9px 15px;border:0;border-radius:6px;font-weight:700;cursor:pointer}.primary{background:#1a73e8;color:#fff}.done{background:#137333;color:#fff}.secondary{background:#e8eaed;color:#202124}.ok{font-size:12px;color:#137333;margin-top:8px}' +
+    '</style></head><body><h2>SBMへ診断結果を引き渡す</h2>' +
+    '<div class="flow">Site Diagnosis → Doctor → Diagnosis → SBM → Writer / Merge</div>' +
+    '<div class="note">下のJSONをコピーし、SIMS-Blog-Managerの「SIMS Doctor → 5．Site Diagnosisの処置を進める」→「① DiagnosisからのDoctor診断結果を登録」へ貼り付けてください。SBMがWriter / Merge / 経過観察へ振り分けます。</div>' +
+    '<textarea id="t" readonly></textarea><div class="actions"><button class="secondary" onclick="google.script.host.close()">閉じる</button><button class="primary" onclick="copyText()">SBM用JSONをコピー</button><button class="done" onclick="done()">SBMへの登録完了</button></div><div id="s" class="ok"></div>' +
+    '<script>const raw="' + encoded + '";function dec(x){x=x.replace(/-/g,"+").replace(/_/g,"/");while(x.length%4)x+="=";return decodeURIComponent(escape(atob(x)))}const t=document.getElementById("t");t.value=dec(raw);function copyText(){t.select();t.setSelectionRange(0,999999);navigator.clipboard.writeText(t.value).then(()=>document.getElementById("s").textContent="コピーしました。SBMへ貼り付けてください。").catch(()=>{document.execCommand("copy");document.getElementById("s").textContent="コピーしました。SBMへ貼り付けてください。"})}function done(){google.script.run.withSuccessHandler(()=>google.script.host.close()).sdsdMarkSbmHandoffComplete_()}</script></body></html>';
+
+  sdsdSetSbmHandoffState_('WAITING_SBM_REGISTRATION');
+  SpreadsheetApp.getUi().showModalDialog(
+    HtmlService.createHtmlOutput(html).setWidth(840).setHeight(650),
+    'SBMへ診断結果を引き渡す'
+  );
+}
+
+function sdsdMarkSbmHandoffComplete_() {
+  sdsdSetSbmHandoffState_('COMPLETE');
+  try { sdsdRenderHome_(); } catch (e) {}
+  return true;
+}
+
 function sdsdProceedNextGuided(){
   const ui=SpreadsheetApp.getUi();
   try{
@@ -1543,11 +1735,16 @@ function sdsdProceedNextGuided(){
         return;
       }
       if(work.actionableTreatment>0){
-        sdsdOpenTreatmentPlan();
-        ui.alert(
-          'Doctorの治療方針が決まっています。\n\n' +
-          '「サイト治療計画」を開きました。Writer / Merge / Creatorへの振り分け内容を確認してください。'
-        );
+        const handoffState=sdsdGetSbmHandoffState_();
+        if(handoffState==='COMPLETE'){
+          sdsdRenderHome_();
+          ui.alert(
+            'SBMへの診断結果引き渡しは完了として記録されています。\n\n' +
+            'Writer / Mergeの処置と経過観察はSIMS-Blog-Managerで続けてください。'
+          );
+          return;
+        }
+        sdsdShowSbmHandoffDialog_();
         return;
       }
       sdsdRenderHome_();
@@ -2648,6 +2845,8 @@ const SDSD_SESSION_PROP_KEYS_ = Object.freeze([
   'SDSD_SITE_WIDE_PRECISION_PACKAGE_FILE_NAME',
   'SDSD_SITE_WIDE_PRECISION_PACKAGE_CLUSTER_COUNT',
   'SDSD_SITE_WIDE_PRECISION_PACKAGE_AT',
+  'SDSD_SBM_HANDOFF_STATUS',
+  'SDSD_SBM_HANDOFF_AT',
   'SDSD_SITE_WIDE_REGISTER_STAGE',
   'SDSD_SITE_WIDE_REGISTER_DETAIL',
   'SDSD_SITE_WIDE_REGISTER_AT'

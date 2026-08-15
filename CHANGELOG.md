@@ -1,3 +1,13 @@
+# v0.5.6
+
+- Connects finalized Site Diagnosis treatment plans to the existing SBM Site Diagnosis intake flow.
+- Generates an SBM-compatible `SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1` from the final normalized treatment plan.
+- Keeps Writer/Merge referral creation inside SIMS-Blog-Manager rather than bypassing SBM.
+- Adapts NO_ACTION to SBM monitoring while preserving the original route as `source_route_to`.
+- Reconstructs Merge target/source only from explicit Doctor article-role evidence and stops when the direction is ambiguous.
+- Adds an explicit SBM handoff completion state and Home guidance.
+- Adds no new cross-product contract.
+
 # v0.5.5
 
 - Fixes duplicate treatment-plan rows after the final site-wide precision batch.
