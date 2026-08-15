@@ -1,3 +1,13 @@
+# v0.4.0-RC9.1
+
+- Rebuilt Diagnosis Home as a dynamic site-diagnosis dashboard.
+- Shows overall site status, candidate counts, decline signals, cannibalization, new-article opportunities and content gaps.
+- Uses stored Doctor site-wide diagnosis as the highest-level site comment when available.
+- Diagnosis automatically decides whether site-wide Doctor diagnosis or individual precision diagnosis is the next route.
+- Home explains the next action, why it is needed, and the exact menu path.
+- Removed user-facing wording that asked the user to decide "必要に応じて横断診断".
+- Refreshes Home after Doctor site-wide result registration.
+
 # v0.4.0-RC9
 
 - Added Diagnosis Home with two primary workflows and next-action guidance.

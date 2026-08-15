@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.4.0-RC9';
+const SDSD_VERSION = '0.4.0-RC9.1';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -89,16 +89,178 @@ function sdsdOpenHome(){
   if(sh) SpreadsheetApp.getActive().setActiveSheet(sh);
 }
 
-function sdsdNextAction_(session,work){
-  if(!session.active)return 'Evidence Packageを読み込んで、サイト診断を開始してください。';
+function sdsdHomeReadStoredSiteWideResult_(){
+  try{
+    const sh=SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.siteWideResult);
+    if(!sh||!sh.getLastRow())return null;
+    const raw=String(sh.getRange('A1').getValue()||'').trim();
+    return raw?JSON.parse(raw):null;
+  }catch(e){return null;}
+}
+
+function sdsdHomeDiagnosisMetrics_(){
+  let rows=[];
+  try{rows=sdsdCandidateRowsFromSheet_()||[];}catch(e){rows=[];}
+
+  const m={
+    total:rows.length,a1:0,a2:0,review:0,sbm:0,protected:0,wait:0,
+    severe:0,traffic:0,ranking:0,volatile:0,growth:0,stable:0,
+    crossTotal:0,cannibal:0,newArticle:0,gap:0
+  };
+  rows.forEach(r=>{
+    const p=String(r.priority||'');
+    if(p==='A1_CANDIDATE')m.a1++;
+    else if(p==='A2_CANDIDATE')m.a2++;
+    else if(/DOCTOR_REVIEW|REVIEW|B_CANDIDATE|CANDIDATE/.test(p))m.review++;
+    else if(p==='SBM')m.sbm++;
+    else if(p==='PROTECTED')m.protected++;
+    else if(p==='WAIT')m.wait++;
+
+    const t=String(r.weeklyTrend||'');
+    if(t==='SEVERE_DECLINE')m.severe++;
+    else if(t==='TRAFFIC_DECLINE')m.traffic++;
+    else if(t==='RANKING_DECLINE')m.ranking++;
+    else if(t==='VOLATILE')m.volatile++;
+    else if(t==='GROWTH')m.growth++;
+    else if(t==='STABLE')m.stable++;
+  });
+
+  try{
+    const opp=sdsdDetectSiteOpportunities_()||[];
+    m.crossTotal=opp.length;
+    opp.forEach(x=>{
+      const type=String(x.type||'');
+      if(type.indexOf('カニバリ')>=0)m.cannibal++;
+      else if(type.indexOf('新規記事')>=0)m.newArticle++;
+      else if(type.indexOf('コンテンツギャップ')>=0)m.gap++;
+    });
+  }catch(e){}
+
+  return m;
+}
+
+function sdsdHomeOverallStatus_(session,m,work,stored){
+  if(!session.active)return {label:'未診断',tone:'GRAY',note:'Evidence Packageを読み込むと診断を開始できます。'};
+  if(stored){
+    const cases=Array.isArray(stored.diagnosis_cases)?stored.diagnosis_cases:[];
+    const urgent=cases.filter(c=>/MERGE|WRITER|CREATOR/.test(String(c.route_to||''))).length;
+    const needs=cases.filter(c=>String(c.route_to||'')==='NEEDS_EVIDENCE').length;
+    if(urgent>0)return {label:'治療方針あり',tone:'YELLOW',note:`Doctor診断済み。処置候補${urgent}件、詳しい確認が必要${needs}件です。`};
+    if(needs>0)return {label:'詳しい確認が必要',tone:'YELLOW',note:`Doctor診断済み。詳しい確認が必要な案件が${needs}件あります。`};
+    return {label:'大きな緊急所見なし',tone:'GREEN',note:'Doctor横断診断では緊急の治療案件は確認されていません。'};
+  }
+  if(m.severe>0||m.a1>0)return {label:'優先確認あり',tone:'RED',note:`優先度の高い診断候補${m.a1}件、または大きな悪化${m.severe}件を確認しています。`};
+  if(m.crossTotal>0)return {label:'横断確認を推奨',tone:'YELLOW',note:`関連する複数記事・検索機会を${m.crossTotal}件検出しています。`};
+  if(m.total>0)return {label:'個別確認あり',tone:'YELLOW',note:`詳しく確認する候補が${m.total}件あります。`};
+  return {label:'診断待ち',tone:'BLUE',note:'Evidenceは読み込み済みです。サイト診断を実行してください。'};
+}
+
+function sdsdHomeGuide_(session,m,work,stored){
   const props=PropertiesService.getDocumentProperties();
-  const registerStage=String(props.getProperty('SDSD_SITE_WIDE_REGISTER_STAGE')||'');
-  if(registerStage==='WAITING_INPUT')return 'Doctorの横断診断結果を登録してください。';
-  if(work.additionalEvidence>0)return '追加Evidenceが必要な案件を精密診断してください。';
-  if(work.actionableTreatment>0)return '治療計画を確認し、Writer / Merge / Creatorへ引き渡してください。';
-  if(work.opportunityCases>0)return 'Doctor Packageを生成し、サイト横断診断を依頼してください。';
-  if(work.candidates>0)return '診断候補を確認し、個別精密診断またはサイト横断診断へ進んでください。';
-  return 'サイト診断を実行してください。';
+  const stage=String(props.getProperty('SDSD_SITE_WIDE_REGISTER_STAGE')||'');
+
+  if(!session.active){
+    return {
+      title:'Evidence Packageを読み込んでください',
+      reason:'まだ診断対象サイトのデータが読み込まれていません。',
+      path:'1. サイト全体を診断する → Evidence Packageを読み込む',
+      tone:'BLUE'
+    };
+  }
+
+  if(stage==='WAITING_INPUT'){
+    return {
+      title:'Doctorの横断診断結果を登録してください',
+      reason:'Doctorへ依頼する段階は完了しています。返ってきた診断結果をDiagnosisへ戻す段階です。',
+      path:'1. サイト全体を診断する → 横断診断：Doctor結果を登録',
+      tone:'YELLOW'
+    };
+  }
+
+  if(stored){
+    if(work.additionalEvidence>0){
+      return {
+        title:`詳しい診断が必要な案件が${work.additionalEvidence}件あります`,
+        reason:'Doctorが、現在の情報だけでは治療方法を確定できないと判断しました。記事本文などを追加して詳しく診断します。',
+        path:'2. 見つかった問題を処置する → 横断診断：追加Evidence Packageを生成',
+        tone:'YELLOW'
+      };
+    }
+    if(work.actionableTreatment>0){
+      return {
+        title:`治療へ進める案件が${work.actionableTreatment}件あります`,
+        reason:'Doctorの診断で治療方針が決まりました。Writer / Merge / Creatorへ引き渡します。',
+        path:'2. 見つかった問題を処置する → サイト治療計画を見る',
+        tone:'BLUE'
+      };
+    }
+    return {
+      title:'Diagnosisで行う作業は完了しています',
+      reason:'現在、追加診断や治療へ送る案件はありません。処置済み記事はSBMで経過観察します。',
+      path:'必要なら「その他・管理 → 現在の診断を終了」で次のサイトへ進めます',
+      tone:'GREEN'
+    };
+  }
+
+  if(work.opportunityCases>0){
+    return {
+      title:'Doctorによるサイト横断診断を進めてください',
+      reason:`Diagnosisが複数記事をまとめて確認すべき案件を${work.opportunityCases}件作成済みです。`,
+      path:'1. サイト全体を診断する → 横断診断：Doctor Packageを生成',
+      tone:'BLUE'
+    };
+  }
+
+  if(m.crossTotal>0){
+    const reasons=[];
+    if(m.cannibal)reasons.push(`カニバリ疑い${m.cannibal}件`);
+    if(m.newArticle)reasons.push(`新規記事機会${m.newArticle}件`);
+    if(m.gap)reasons.push(`コンテンツギャップ${m.gap}件`);
+    return {
+      title:'Doctorによるサイト横断診断が必要です',
+      reason:`Diagnosisが、1記事だけでは判断しにくい関連案件を検出しました（${reasons.join('、')||m.crossTotal+'件'}）。利用者が要否を判断する必要はありません。`,
+      path:'1. サイト全体を診断する → 横断診断：Doctor案件を作成',
+      tone:'YELLOW'
+    };
+  }
+
+  if(m.total>0){
+    return {
+      title:`個別に詳しく診る記事が${m.total}件あります`,
+      reason:'他記事との関係をまとめて調べる横断診断は不要と判定しました。優先記事をDoctorで詳しく診断します。',
+      path:'2. 見つかった問題を処置する → 個別記事：Doctorへ送る記事を選ぶ',
+      tone:'BLUE'
+    };
+  }
+
+  return {
+    title:'サイト診断を実行してください',
+    reason:'Evidence Packageは読み込み済みですが、サイト全体の診断結果がまだありません。',
+    path:'1. サイト全体を診断する → サイト診断を実行',
+    tone:'BLUE'
+  };
+}
+
+function sdsdHomeComment_(m,stored){
+  if(stored&&stored.overall_diagnosis)return String(stored.overall_diagnosis);
+  if(!m.total)return 'サイト診断を実行すると、ここにサイト全体の所見を表示します。';
+  const parts=[];
+  if(m.a1||m.a2)parts.push(`優先的に詳しく確認する記事が${m.a1+m.a2}件あります`);
+  if(m.severe||m.traffic||m.ranking)parts.push(`悪化シグナルが${m.severe+m.traffic+m.ranking}件あります`);
+  if(m.crossTotal)parts.push(`記事同士の関係を確認すべき横断案件が${m.crossTotal}件あります`);
+  if(!parts.length)parts.push('緊急性の高いシグナルは多くありません');
+  return parts.join('。')+'。Diagnosisが次の診断経路を自動判定します。';
+}
+
+function sdsdToneColor_(tone){
+  const map={
+    BLUE:{bg:'#E8F0FE',fg:'#174EA6',accent:'#185ABC'},
+    GREEN:{bg:'#E6F4EA',fg:'#137333',accent:'#188038'},
+    YELLOW:{bg:'#FEF7E0',fg:'#9A6700',accent:'#F9AB00'},
+    RED:{bg:'#FCE8E6',fg:'#B3261E',accent:'#D93025'},
+    GRAY:{bg:'#F1F3F4',fg:'#5F6368',accent:'#80868B'}
+  };
+  return map[tone]||map.BLUE;
 }
 
 function sdsdRenderHome_(){
@@ -111,43 +273,81 @@ function sdsdRenderHome_(){
 
   const session=sdsdGetCurrentSession_();
   const work=sdsdSessionWorkSummary_();
-  const next=sdsdNextAction_(session,work);
+  const metrics=sdsdHomeDiagnosisMetrics_();
+  const stored=sdsdHomeReadStoredSiteWideResult_();
+  const overall=sdsdHomeOverallStatus_(session,metrics,work,stored);
+  const guide=sdsdHomeGuide_(session,metrics,work,stored);
   const siteLabel=session.active?(session.siteName||session.siteId||session.host||'判定できません'):'未読込';
+  const overallColor=sdsdToneColor_(overall.tone);
+  const guideColor=sdsdToneColor_(guide.tone);
 
   sh.getRange('A1:H1').merge().setValue('SIMS Doctor | Site Diagnosis');
-  sh.getRange('A2:H2').merge().setValue('サイト全体を診断し、見つかった問題を詳しく調べて治療へつなぎます。');
+  sh.getRange('A2:H2').merge().setValue('この画面を見れば、サイトの状態と次に行う作業が分かります。');
 
-  sh.getRange('A4:B7').setValues([
-    ['現在の診断サイト',siteLabel],
+  sh.getRange('A4:B8').setValues([
+    ['対象サイト',siteLabel],
     ['Evidence',session.evidenceFileName||'未読込'],
-    ['診断候補',work.candidates+'件'],
+    ['総合状態',overall.label],
+    ['診断候補',metrics.total+'件'],
     ['要確認作業',work.pendingTotal+'件']
   ]);
 
-  sh.getRange('A9:H9').merge().setValue('① サイト全体を診断する');
-  sh.getRange('A10:H10').merge().setValue('Evidenceを読み込む → サイト診断 → 診断候補を確認 → 必要に応じてDoctor横断診断');
-  sh.getRange('A12:H12').merge().setValue('② 見つかった問題を処置する');
-  sh.getRange('A13:H13').merge().setValue('個別精密診断 / 追加Evidence → Doctor → Writer / Merge / Creator → SBM');
-  sh.getRange('A15:H15').merge().setValue('次に行うこと');
-  sh.getRange('A16:H17').merge().setValue(next);
+  sh.getRange('D4:H4').merge().setValue('サイト全体の分析結果');
+  sh.getRange('D5:E9').setValues([
+    ['優先確認',metrics.a1+metrics.a2+'件'],
+    ['大きな悪化',metrics.severe+'件'],
+    ['カニバリ疑い',metrics.cannibal+'件'],
+    ['新規記事機会',metrics.newArticle+'件'],
+    ['コンテンツギャップ',metrics.gap+'件']
+  ]);
+  sh.getRange('F5:H9').merge().setValue(sdsdHomeComment_(metrics,stored));
 
-  sh.getRange('A19:H19').merge().setValue('状態の見方');
-  sh.getRange('A20:H20').merge().setValue('青：通常の操作　　緑：完了　　黄：確認・Evidence待ち　　赤：エラー　　灰：現在操作不要');
+  sh.getRange('A11:H11').merge().setValue('Diagnosisの判断');
+  sh.getRange('A12:H13').merge().setValue(overall.note);
+
+  sh.getRange('A15:H15').merge().setValue('次に行うこと');
+  sh.getRange('A16:H17').merge().setValue(guide.title);
+  sh.getRange('A18:H19').merge().setValue('理由：'+guide.reason);
+  sh.getRange('A20:H20').merge().setValue('操作：'+guide.path);
+
+  sh.getRange('A22:H22').merge().setValue('基本の使い方');
+  sh.getRange('A23:H23').merge().setValue('Collectorで最新データを収集 → Diagnosisへ読み込む → このHomeの「次に行うこと」に従う');
+
+  sh.getRange('A25:H25').merge().setValue('状態の色');
+  sh.getRange('A26:H26').merge().setValue('青：通常の操作　　緑：完了　　黄：確認・追加診断　　赤：優先確認　　灰：未診断・現在不要');
 
   sh.getRange('A1:H1').setBackground('#185ABC').setFontColor('#FFFFFF').setFontWeight('bold').setFontSize(18);
-  sh.getRange('A2:H2').setBackground('#E8F0FE').setFontColor('#174EA6').setFontSize(11);
-  ['A9:H9','A12:H12','A15:H15','A19:H19'].forEach(r=>sh.getRange(r).setBackground('#D2E3FC').setFontColor('#174EA6').setFontWeight('bold'));
-  sh.getRange('A16:H17').setBackground('#FFF4CE').setFontWeight('bold').setFontSize(12);
-  sh.getRange('A4:A7').setBackground('#F1F3F4').setFontWeight('bold');
-  sh.getRange('B4:B7').setBackground('#FFFFFF');
-  if(session.active)sh.getRange('B4').setBackground('#E6F4EA').setFontColor('#137333').setFontWeight('bold');
-  sh.getRange('A1:H20').setWrap(true).setVerticalAlignment('middle');
+  sh.getRange('A2:H2').setBackground('#D2E3FC').setFontColor('#174EA6').setFontSize(11);
+
+  sh.getRange('A4:A8').setBackground('#F1F3F4').setFontWeight('bold').setFontColor('#5F6368');
+  sh.getRange('B4:B8').setBackground('#FFFFFF');
+  sh.getRange('B6').setBackground(overallColor.bg).setFontColor(overallColor.fg).setFontWeight('bold');
+
+  sh.getRange('D4:H4').setBackground('#D2E3FC').setFontColor('#174EA6').setFontWeight('bold');
+  sh.getRange('D5:D9').setBackground('#F8F9FA').setFontWeight('bold').setFontColor('#5F6368');
+  sh.getRange('E5:E9').setHorizontalAlignment('center').setFontWeight('bold');
+  sh.getRange('F5:H9').setBackground('#F8F9FA');
+
+  ['A11:H11','A15:H15','A22:H22','A25:H25'].forEach(r=>sh.getRange(r).setBackground('#D2E3FC').setFontColor('#174EA6').setFontWeight('bold'));
+  sh.getRange('A12:H13').setBackground(overallColor.bg).setFontColor(overallColor.fg);
+  sh.getRange('A16:H17').setBackground(guideColor.bg).setFontColor(guideColor.fg).setFontWeight('bold').setFontSize(14);
+  sh.getRange('A18:H20').setBackground('#FFFFFF');
+  sh.getRange('A20:H20').setFontWeight('bold').setFontColor('#174EA6');
+
+  sh.getRange('A1:H26').setWrap(true).setVerticalAlignment('middle');
+  sh.getRange('A1:H26').setFontFamily('Arial');
   sh.setFrozenRows(2);
-  sh.setColumnWidth(1,170); sh.setColumnWidth(2,330);
-  for(let c=3;c<=8;c++)sh.setColumnWidth(c,95);
-  sh.setRowHeight(1,34); sh.setRowHeight(2,30); sh.setRowHeights(9,12,30);
   sh.setHiddenGridlines(true);
+  sh.setColumnWidth(1,150);sh.setColumnWidth(2,310);
+  sh.setColumnWidth(3,20);sh.setColumnWidth(4,145);sh.setColumnWidth(5,105);
+  sh.setColumnWidth(6,150);sh.setColumnWidth(7,150);sh.setColumnWidth(8,150);
+  sh.setRowHeight(1,36);sh.setRowHeight(2,28);
+  sh.setRowHeights(4,5,30);sh.setRowHeights(11,16,28);
+  sh.getRange('A1:H26').setBorder(false,false,false,false,false,false);
+  sh.getRange('A4:B8').setBorder(true,true,true,true,true,true,'#DADCE0',SpreadsheetApp.BorderStyle.SOLID);
+  sh.getRange('D4:H9').setBorder(true,true,true,true,true,true,'#DADCE0',SpreadsheetApp.BorderStyle.SOLID);
 }
+
 
 function sdsdInitialize() {
   sdsdProductEnsureSheets_();
@@ -1934,7 +2134,7 @@ function sdsdShowCurrentSessionStatus() {
   if (!session.active) {
     ui.alert(
       '現在、診断中のサイトはありません。\n\n' +
-      '「1. Evidence Packageを読み込む」から診断を開始してください。'
+      '「1. サイト全体を診断する → Evidence Packageを読み込む」から診断を開始してください。'
     );
     return;
   }
@@ -2046,7 +2246,7 @@ function sdsdAssertNoActiveDiagnosisSessionBeforeImport_() {
     '現在の診断セッションが残っています。\n\n' +
     `対象サイト: ${session.siteId || session.host || '判定できません'}\n` +
     `診断候補: ${work.candidates}件 / 要確認作業: ${work.pendingTotal}件\n\n` +
-    '別のEvidenceを読み込む前に、メニュー「診断セッション → 現在の診断を終了」を実行してください。\n' +
+    '別のEvidenceを読み込む前に、メニュー「その他・管理 → 現在の診断を終了」を実行してください。\n' +
     'これにより、別サイトのデータが混在することを防ぎます。'
   );
 }
@@ -5239,6 +5439,7 @@ function sdsdRegisterSiteWideDoctorResult() {
 
     sdsdSetSiteWideRegisterStage_('COMPLETE', `登録完了 ${count}件`);
     sdsdClearSiteWideResultImport_();
+    try{sdsdRenderHome_();}catch(e){}
 
     ui.alert(
       `Doctor横断診断結果を登録しました。\n\n` +
