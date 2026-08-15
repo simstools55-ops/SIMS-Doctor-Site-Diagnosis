@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.4.0-RC9.3.2';
+const SDSD_VERSION = '0.4.0-RC9.3.3';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -1138,7 +1138,7 @@ function sdsdProceedIndividualPrecisionDiagnosis(){
       `対象: ${exported.caseCount}記事\n` +
       `ファイル: ${exported.fileName}\n` +
       `SBM ArticleID使用: ${exported.realArticleIdCount}件 / URL自動識別: ${exported.surrogateArticleIdCount}件\n\n` +
-      'Diagnosisが対象選定・記事識別・本文取得・クエリ準備まで行いました。\n' +
+      'Diagnosisが対象選定・記事識別・現在タイトル確認・本文取得・クエリ準備まで行いました。\n' +
       'このPackageをSIMS Doctorへ渡してください。\n\n' +
       exported.fileUrl
     );
@@ -1671,7 +1671,9 @@ function sdsdEnrichSelectedCases(options) {
     }
 
     const fetched = sdsdFetchArticleEvidence_(url);
-    const title = (master && master.title) ? String(master.title) : String(fetched.title || '');
+    const masterTitle = (master && master.title) ? String(master.title) : '';
+    const liveTitle = String(fetched.title || '').trim();
+    const title = liveTitle || masterTitle || sdsdTitleFromUrlFallback_(url);
     const mainQuery = (master && master.mainQuery)
       ? String(master.mainQuery)
       : String((queryEvidence[0] && queryEvidence[0].query) || '');
@@ -1750,12 +1752,49 @@ function sdsdEnrichSelectedCases(options) {
     referral.article_id_is_surrogate = identityInfo.surrogate;
     referral.article_url = url;
 
+    const requestedCanonical = sdsdNormalizeUrl_(url);
+    const observedCanonical = String(fetched.canonicalUrl || '').trim();
+    const observedCanonicalNormalized = observedCanonical ? sdsdNormalizeUrl_(observedCanonical) : '';
+    const titleMismatch = Boolean(masterTitle && liveTitle && masterTitle !== liveTitle);
+    const canonicalMismatch = Boolean(
+      observedCanonicalNormalized &&
+      requestedCanonical &&
+      observedCanonicalNormalized !== requestedCanonical
+    );
+
+    referral.data_quality_flags = Array.isArray(referral.data_quality_flags)
+      ? referral.data_quality_flags
+      : [];
+    if (titleMismatch) {
+      referral.data_quality_flags.push({
+        field: 'article_evidence.title',
+        issue: 'Article Master title differs from the live page title.',
+        master_value: masterTitle,
+        live_value: liveTitle,
+        resolution: 'LIVE_PAGE_TITLE_USED'
+      });
+    }
+    if (canonicalMismatch) {
+      referral.data_quality_flags.push({
+        field: 'article_evidence.observed_html_canonical_url',
+        issue: 'HTML canonical differs from the requested/canonical article URL used by Diagnosis.',
+        requested_url: url,
+        observed_html_canonical_url: observedCanonical,
+        resolution: 'REQUESTED_ARTICLE_URL_RETAINED_AS_CANONICAL_IDENTITY'
+      });
+    }
+
     referral.article_evidence = {
       status: 'VALID',
-      title: title || fetched.title,
-      page_title: fetched.title,
+      title: title,
+      title_source: liveTitle ? 'LIVE_PAGE' : (masterTitle ? 'ARTICLE_MASTER_FALLBACK' : 'URL_FALLBACK'),
+      page_title: liveTitle,
+      article_url: url,
+      canonical_url: url,
+      canonical_url_source: 'DIAGNOSIS_ARTICLE_URL',
+      observed_html_canonical_url: observedCanonical,
+      canonical_mismatch: canonicalMismatch,
       meta_description: fetched.metaDescription,
-      canonical_url: fetched.canonicalUrl || url,
       main_query: mainQuery,
       identity_note: identityInfo.surrogate
         ? 'SBM ArticleID未取得。記事URLを正本としてDiagnosis内部IDを使用。SBM返却時はURL照合してください。'
@@ -1938,6 +1977,7 @@ function sdsdExportDoctorCasePackageZip(options) {
       article_id_source: String(identity.article_id_source || (isSurrogate ? 'URL_SURROGATE' : 'SBM_ARTICLE_MASTER')),
       article_id_is_surrogate: isSurrogate,
       canonical_article_url: url,
+      canonical_article_url_source: 'DIAGNOSIS_ARTICLE_URL',
       url: url,
       priority: String(r[idx['Site Priority']] || ''),
       tvs: Number(r[idx['TVS']] || 0),
@@ -4839,7 +4879,14 @@ function sdsdPrecisionArticleEvidence_(article) {
     article_meta: {
       page_title: fetched.title,
       meta_description: fetched.metaDescription,
-      canonical_url: fetched.canonicalUrl || url,
+      article_url: url,
+      canonical_url: url,
+      canonical_url_source: 'DIAGNOSIS_ARTICLE_URL',
+      observed_html_canonical_url: String(fetched.canonicalUrl || ''),
+      canonical_mismatch: Boolean(
+        fetched.canonicalUrl &&
+        sdsdNormalizeUrl_(fetched.canonicalUrl) !== sdsdNormalizeUrl_(url)
+      ),
       fetched_at: new Date().toISOString()
     },
     search_console: {

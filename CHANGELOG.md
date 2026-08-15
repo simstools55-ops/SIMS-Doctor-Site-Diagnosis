@@ -1,3 +1,13 @@
+# v0.4.0-RC9.3.3
+
+- Fixed stale title propagation in individual Doctor packages.
+- Live fetched page title is now authoritative; Article Master title is fallback only.
+- `article_url` is now the authoritative canonical identity used by Diagnosis.
+- HTML `<link rel="canonical">` is stored separately as `observed_html_canonical_url`.
+- Canonical mismatches no longer overwrite package identity; they are recorded as data-quality flags.
+- Article Master/live-title mismatches are also recorded as data-quality flags.
+- Applied the same canonical semantics to site-wide precision evidence.
+
 # v0.4.0-RC9.3.2
 
 - Removed manual Article Master CSV import as a prerequisite for individual Doctor precision packages.
