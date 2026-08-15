@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.4.0-RC7';
+const SDSD_VERSION = '0.4.0-RC8';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -51,6 +51,10 @@ function onOpen() {
     .addItem('7. 追加Evidence Packageを生成', 'sdsdExportPriorityPrecisionClusterPackage')
     .addItem('8. 選択中のMerge紹介状を作成', 'sdsdCreateMergeReferralFromSelectedTreatment');
 
+  const sessionMenu = ui.createMenu('診断セッション')
+    .addItem('現在の診断状況を確認', 'sdsdShowCurrentSessionStatus')
+    .addItem('現在の診断を終了', 'sdsdEndCurrentDiagnosisSession');
+
   const setupMenu = ui.createMenu('初期設定・データ準備')
     .addItem('初期設定を実行', 'sdsdInitialize')
     .addSeparator()
@@ -71,6 +75,7 @@ function onOpen() {
     .addItem('3. 診断結果を見る', 'sdsdOpenSiteSummary')
     .addItem('4. 診断候補を見る', 'sdsdOpenCandidates')
     .addSeparator()
+    .addSubMenu(sessionMenu)
     .addSubMenu(precisionMenu)
     .addSubMenu(siteWideMenu)
     .addSeparator()
@@ -1763,6 +1768,219 @@ function sdsdBuildEvidenceMap_() {
 }
 
 // ============================================================================
+// Source: DiagnosisSessionLifecycle.gs (RC8)
+// ============================================================================
+const SDSD_SESSION_PROP_KEYS_ = Object.freeze([
+  'SDSD_SESSION_STATUS',
+  'SDSD_SESSION_SITE_ID',
+  'SDSD_SESSION_HOST',
+  'SDSD_SESSION_EVIDENCE_FILE_ID',
+  'SDSD_SESSION_EVIDENCE_FILE_NAME',
+  'SDSD_SESSION_STARTED_AT',
+  'SDSD_LAST_EVIDENCE_FILE_ID',
+  'SDSD_ACTIVE_BATCH_ID',
+  'SDSD_LAST_SITE_WIDE_RESULT_AT',
+  'SDSD_SITE_WIDE_REGISTER_STAGE',
+  'SDSD_SITE_WIDE_REGISTER_DETAIL',
+  'SDSD_SITE_WIDE_REGISTER_AT'
+]);
+
+function sdsdSheetDataRowCount_(sheetName) {
+  const sh = SpreadsheetApp.getActive().getSheetByName(sheetName);
+  if (!sh) return 0;
+  const last = sh.getLastRow();
+  if (last < 2) return 0;
+  const values = sh.getRange(2, 1, last - 1, Math.max(sh.getLastColumn(), 1)).getDisplayValues();
+  return values.filter(r => r.some(v => String(v || '').trim() !== '')).length;
+}
+
+function sdsdInferCurrentEvidenceSite_() {
+  const rows = sdsdReadObjects_(SDSD_CONFIG.sheets.evidencePageSummary);
+  if (!rows.length) return {siteId:'', host:'', url:''};
+  const row = rows[0] || {};
+  const url = String(
+    row.key || row.url || row.URL || row.page || row.Page || row['ページ'] || ''
+  ).trim();
+  if (!url) return {siteId:'', host:'', url:''};
+  const m = url.match(/^https?:\/\/([^\/:?#]+)/i);
+  const host = m ? String(m[1]).toLowerCase().replace(/^www\./, '') : '';
+  return {siteId:sdsdSiteIdFromUrl_(url), host:host, url:url};
+}
+
+function sdsdGetCurrentSession_() {
+  const props = PropertiesService.getDocumentProperties();
+  const inferred = sdsdInferCurrentEvidenceSite_();
+  const evidenceRows = sdsdSheetDataRowCount_(SDSD_CONFIG.sheets.evidencePageSummary);
+  let status = String(props.getProperty('SDSD_SESSION_STATUS') || '').trim();
+  if (!status && evidenceRows > 0) status = 'ACTIVE_LEGACY';
+  return {
+    active: status === 'ACTIVE' || status === 'ACTIVE_LEGACY',
+    status: status,
+    siteId: String(props.getProperty('SDSD_SESSION_SITE_ID') || inferred.siteId || ''),
+    host: String(props.getProperty('SDSD_SESSION_HOST') || inferred.host || ''),
+    evidenceFileId: String(props.getProperty('SDSD_SESSION_EVIDENCE_FILE_ID') || props.getProperty('SDSD_LAST_EVIDENCE_FILE_ID') || ''),
+    evidenceFileName: String(props.getProperty('SDSD_SESSION_EVIDENCE_FILE_NAME') || ''),
+    startedAt: String(props.getProperty('SDSD_SESSION_STARTED_AT') || ''),
+    evidenceRows: evidenceRows
+  };
+}
+
+function sdsdSessionWorkSummary_() {
+  const selected = sdsdSheetDataRowCount_(SDSD_CONFIG.sheets.selectedCases);
+  const opportunityCases = sdsdSheetDataRowCount_(SDSD_CONFIG.sheets.opportunityCases);
+  const candidates = sdsdSheetDataRowCount_(SDSD_CONFIG.sheets.candidates);
+
+  let actionableTreatment = 0;
+  let additionalEvidence = 0;
+  const sh = SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.treatmentPlan);
+  if (sh && sh.getLastRow() >= 2) {
+    const vals = sh.getDataRange().getDisplayValues();
+    const headers = vals[0].map(x => String(x || '').trim());
+    const nextIdx = headers.indexOf('次の処置');
+    const stateIdx = headers.indexOf('状態');
+    vals.slice(1).forEach(r => {
+      if (!r.some(v => String(v || '').trim() !== '')) return;
+      const next = nextIdx >= 0 ? String(r[nextIdx] || '') : '';
+      const state = stateIdx >= 0 ? String(r[stateIdx] || '') : '';
+      if (/Writer|Merge|Creator/.test(next)) actionableTreatment++;
+      if (state.indexOf('追加確認待ち') >= 0 || next.indexOf('追加Evidence') >= 0) additionalEvidence++;
+    });
+  }
+
+  return {
+    candidates: candidates,
+    selectedCases: selected,
+    opportunityCases: opportunityCases,
+    actionableTreatment: actionableTreatment,
+    additionalEvidence: additionalEvidence,
+    pendingTotal: selected + opportunityCases + actionableTreatment + additionalEvidence
+  };
+}
+
+function sdsdShowCurrentSessionStatus() {
+  sdsdProductEnsureSheets_();
+  const ui = SpreadsheetApp.getUi();
+  const session = sdsdGetCurrentSession_();
+  const work = sdsdSessionWorkSummary_();
+  if (!session.active) {
+    ui.alert(
+      '現在、診断中のサイトはありません。\n\n' +
+      '「1. Evidence Packageを読み込む」から診断を開始してください。'
+    );
+    return;
+  }
+  ui.alert(
+    '現在の診断セッション\n\n' +
+    `対象サイト: ${session.siteId || session.host || '判定できません'}\n` +
+    (session.host ? `ホスト: ${session.host}\n` : '') +
+    (session.evidenceFileName ? `Evidence: ${session.evidenceFileName}\n` : '') +
+    (session.startedAt ? `開始: ${session.startedAt}\n` : '') +
+    `Evidence記事数: ${session.evidenceRows}件\n\n` +
+    `診断候補: ${work.candidates}件\n` +
+    `個別精密診断対象: ${work.selectedCases}件\n` +
+    `サイト横断Doctor案件: ${work.opportunityCases}件\n` +
+    `Writer/Merge/Creator振り分け: ${work.actionableTreatment}件\n` +
+    `追加Evidence待ち: ${work.additionalEvidence}件\n\n` +
+    '別サイトを診断する場合は、先に「診断セッション → 現在の診断を終了」を実行してください。'
+  );
+}
+
+function sdsdClearDiagnosisSessionData_() {
+  const ss = SpreadsheetApp.getActive();
+  const names = [
+    SDSD_CONFIG.sheets.evidencePageSummary,
+    SDSD_CONFIG.sheets.evidencePageWeekly,
+    SDSD_CONFIG.sheets.evidencePageQuery,
+    SDSD_CONFIG.sheets.sbmHistory,
+    SDSD_CONFIG.sheets.summary,
+    SDSD_CONFIG.sheets.candidates,
+    SDSD_CONFIG.sheets.selectedCases,
+    SDSD_CONFIG.sheets.articleMaster,
+    SDSD_CONFIG.sheets.opportunities,
+    SDSD_CONFIG.sheets.opportunityCases,
+    SDSD_CONFIG.sheets.siteWideResult,
+    SDSD_CONFIG.sheets.treatmentPlan
+  ];
+  names.forEach(name => {
+    const sh = ss.getSheetByName(name);
+    if (sh) sh.clearContents();
+  });
+
+  const merge = ss.getSheetByName(sdsdMergeReferralSheetName_());
+  if (merge) merge.clearContents();
+
+  const importSh = ss.getSheetByName(SDSD_CONFIG.sheets.siteWideResultImport);
+  if (importSh) importSh.clearContents();
+  try { sdsdEnsureSiteWideResultImportSheet_(); } catch (e) {}
+
+  const props = PropertiesService.getDocumentProperties();
+  SDSD_SESSION_PROP_KEYS_.forEach(k => props.deleteProperty(k));
+}
+
+function sdsdEndCurrentDiagnosisSession() {
+  sdsdProductEnsureSheets_();
+  const ui = SpreadsheetApp.getUi();
+  const session = sdsdGetCurrentSession_();
+  const work = sdsdSessionWorkSummary_();
+
+  if (!session.active && work.pendingTotal === 0 && work.candidates === 0) {
+    ui.alert('現在、終了する診断セッションはありません。');
+    return;
+  }
+
+  let warning =
+    `対象サイト: ${session.siteId || session.host || '判定できません'}\n\n` +
+    'この操作を行うと、現在のEvidence・診断候補・診断結果・Article Master・SBM改善履歴の作業コピーをクリアします。\n' +
+    'SBM本体に登録済みの改善履歴には影響しません。\n\n';
+
+  if (work.pendingTotal > 0) {
+    warning +=
+      `要確認の作業データが ${work.pendingTotal}件あります。\n` +
+      `・個別精密診断対象: ${work.selectedCases}件\n` +
+      `・サイト横断Doctor案件: ${work.opportunityCases}件\n` +
+      `・Writer/Merge/Creator振り分け: ${work.actionableTreatment}件\n` +
+      `・追加Evidence待ち: ${work.additionalEvidence}件\n\n` +
+      '必要な案件をDoctor/SBMへ引き渡したことを確認してから終了してください。\n\n';
+  }
+
+  warning += '現在の診断を終了して、次のサイトを診断できる状態にしますか？';
+  const answer = ui.alert('現在の診断を終了', warning, ui.ButtonSet.YES_NO);
+  if (answer !== ui.Button.YES) return;
+
+  sdsdClearDiagnosisSessionData_();
+  ui.alert(
+    '現在の診断セッションを終了しました。\n\n' +
+    '作業データをクリアしました。\n' +
+    '次に「1. Evidence Packageを読み込む」から別サイトの診断を開始できます。'
+  );
+}
+
+function sdsdRegisterDiagnosisSession_(fileId, fileName) {
+  const props = PropertiesService.getDocumentProperties();
+  const info = sdsdInferCurrentEvidenceSite_();
+  props.setProperty('SDSD_SESSION_STATUS', 'ACTIVE');
+  props.setProperty('SDSD_SESSION_SITE_ID', String(info.siteId || ''));
+  props.setProperty('SDSD_SESSION_HOST', String(info.host || ''));
+  props.setProperty('SDSD_SESSION_EVIDENCE_FILE_ID', String(fileId || ''));
+  props.setProperty('SDSD_SESSION_EVIDENCE_FILE_NAME', String(fileName || ''));
+  props.setProperty('SDSD_SESSION_STARTED_AT', new Date().toISOString());
+  return info;
+}
+
+function sdsdAssertNoActiveDiagnosisSessionBeforeImport_() {
+  const session = sdsdGetCurrentSession_();
+  if (!session.active) return;
+  const work = sdsdSessionWorkSummary_();
+  throw new Error(
+    '現在の診断セッションが残っています。\n\n' +
+    `対象サイト: ${session.siteId || session.host || '判定できません'}\n` +
+    `診断候補: ${work.candidates}件 / 要確認作業: ${work.pendingTotal}件\n\n` +
+    '別のEvidenceを読み込む前に、メニュー「診断セッション → 現在の診断を終了」を実行してください。\n' +
+    'これにより、別サイトのデータが混在することを防ぎます。'
+  );
+}
+
+// ============================================================================
 // Source: EvidencePackageImporter.gs
 // ============================================================================
 function sdsdExtractDriveFileId_(text) {
@@ -1783,6 +2001,12 @@ function sdsdImportEvidencePackageZip() {
   sdsdProductEnsureSheets_();
 
   const ui = SpreadsheetApp.getUi();
+  try {
+    sdsdAssertNoActiveDiagnosisSessionBeforeImport_();
+  } catch (e) {
+    ui.alert(String(e && e.message ? e.message : e));
+    return;
+  }
   const prompt = ui.prompt(
     `SIMS Doctor Site Diagnosis ${SDSD_VERSION}`,
     'Google Drive上のCollector Evidence ZIPのURL、またはファイルIDを入力してください。',
@@ -1852,11 +2076,13 @@ function sdsdImportEvidencePackageZip() {
     'SDSD_LAST_EVIDENCE_FILE_ID',
     fileId
   );
+  const sessionSite = sdsdRegisterDiagnosisSession_(fileId, name);
 
   const diag = sdsdEvidenceImportIntegrity_();
 
   ui.alert(
     `Evidence Package取込完了\n\n` +
+    `対象サイト: ${sessionSite.siteId || sessionSite.host || '判定できません'}\n` +
     `ZIP: ${name}\n` +
     `page_summary: ${report[0].dataRows}行\n` +
     `page_weekly: ${report[1].dataRows}行\n` +

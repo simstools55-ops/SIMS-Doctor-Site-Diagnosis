@@ -1,16 +1,15 @@
-# SIMS Doctor Site Diagnosis v0.4.0-RC6 Single-Code
+# SIMS Doctor Site Diagnosis v0.4.0-RC8
 
-RC5-HF-SITE-WIDE-PRECISION-RESULT の現行 Apps Script ロジックを、利用者が更新しやすい `Code.gs` 1本へ集約した構成整理版です。
+RC8 keeps the RC7 user-oriented menu and adds diagnosis-session lifecycle protection.
 
-## Apps Script投入対象
+## Normal use
 
-- `Code.gs`
-- `appsscript.json`（権限・ランタイム変更時のみ更新）
+1. `1. Evidence Packageを読み込む`
+2. `2. サイト診断を実行`
+3. Review diagnosis candidates and hand required cases to Doctor / SBM.
+4. Before moving to another site, run `診断セッション > 現在の診断を終了`.
+5. Import the next site's latest Evidence Package.
 
-## 方針
+Site Diagnosis is a shared one-site-at-a-time workspace. Long-term treatment history remains in each site's SBM.
 
-診断ロジック・メニュー・Evidence処理・Site-wide診断・Treatment Plan・Merge紹介状生成など、従来31個の `.gs` に分かれていた現行処理を `Code.gs` に統合しています。
-
-RC5系からの初回移行時だけ、旧分割 `.gs` をすべて削除してから `Code.gs` を投入してください。以後の通常Hotfixは原則 `Code.gs` の置換だけで適用できます。
-
-詳細は `RC6-SINGLE-CODE-APPLY.md` を参照してください。
+See `RC8-SESSION-LIFECYCLE.md` and `APPLY-RC8.md`.

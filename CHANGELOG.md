@@ -85,3 +85,13 @@
 ## 0.1.x
 
 - URL正規化、TVS、Treatment Ownership、Recent Treatment Guard、候補一覧を実装。
+
+## v0.4.0-RC8 - Diagnosis Session Lifecycle
+
+- Added one-site-per-diagnosis-session lifecycle control.
+- Added `診断セッション > 現在の診断状況を確認`.
+- Added `診断セッション > 現在の診断を終了`.
+- Blocked new Evidence imports while the current session remains active.
+- Added explicit warning/counts before clearing current diagnostic work data.
+- Session end clears Diagnosis working copies, including site-specific SBM history and Article Master copies, while leaving the original SBM untouched.
+- No diagnosis scoring or treatment-selection logic changed.
