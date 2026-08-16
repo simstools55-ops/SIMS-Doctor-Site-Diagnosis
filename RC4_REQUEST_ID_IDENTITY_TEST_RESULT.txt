@@ -1,0 +1,29 @@
+SIMS Doctor Site Diagnosis v0.4.0-RC4
+Request ID / Identity Contract Hotfix
+
+Static verification: PASS
+
+Checks:
+- CaseIdentity.gs JavaScript syntax: PASS
+- CasePackageBuilder.gs JavaScript syntax: PASS
+- SiteDiagnosisConfig.gs JavaScript syntax: PASS
+- All .gs files from RC3 baseline parse successfully after RC4 patch: PASS
+- request_id generator exists: PASS
+- request_id format is deterministic per batch/article: PASS
+- Top-level case_id output: PASS
+- Top-level request_id output: PASS
+- Top-level site_diagnosis_case_id output: PASS
+- Top-level site_diagnosis_batch_id output: PASS
+- Top-level site_id output: PASS
+- Top-level article_id output: PASS
+- Top-level article_url output: PASS
+- case_identity request_id compatibility copy: PASS
+- ZIP manifest request_id output: PASS
+- Export rejects missing request_id: PASS
+- VERSION = 0.4.0-RC4: PASS
+- SDSD_VERSION = 0.4.0-RC4: PASS
+- UTF-8 replacement-character scan: PASS
+
+Real-sheet UAT: REQUIRED
+Expected result:
+Doctor must return the same request_id received from the Site Diagnosis case package; request_id:null or substitution with site_diagnosis_case_id is no longer expected.
