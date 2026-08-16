@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.5.10';
+const SDSD_VERSION = '0.5.11';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -41,7 +41,7 @@ function onOpen() {
     .addItem('個別精密診断対象を見る', 'sdsdOpenSelectedCases')
     .addItem('サイト治療計画を見る', 'sdsdOpenTreatmentPlan');
 
-  const manualMenu = ui.createMenu('手動・保守操作')
+  const manualMenu = ui.createMenu('保守・復旧操作')
     .addItem('Evidence Packageを読み込む', 'sdsdImportEvidencePackageZip')
     .addItem('サイト診断を実行', 'sdsdRunProductDiagnosis')
     .addSeparator()
@@ -60,12 +60,11 @@ function onOpen() {
     .addItem('内部シートを表示', 'sdsdShowInternalSheets')
     .addItem('内部シートを隠す', 'sdsdHideInternalSheets');
 
-  const otherMenu = ui.createMenu('その他・管理')
+  const otherMenu = ui.createMenu('設定・管理')
     .addItem('現在の診断状況を確認', 'sdsdShowCurrentSessionStatus')
     .addItem('現在の診断を終了', 'sdsdEndCurrentDiagnosisSession')
     .addSeparator()
-    .addItem('ZIP保存先を設定', 'sdsdChooseOutputFolder')
-    .addItem('現在のZIP保存先を確認', 'sdsdShowOutputFolder')
+    .addItem('ZIP保存先', 'sdsdChooseOutputFolder')
     .addSeparator()
     .addItem('初期設定を実行', 'sdsdInitialize')
     .addSubMenu(manualMenu);
@@ -240,7 +239,7 @@ function sdsdHomeGuide_(session,m,work,stored){
     return {
       title:'Diagnosisで行う作業は完了しています',
       reason:'現在、追加診断や治療へ送る案件はありません。処置済み記事はSBMで経過観察します。',
-      path:'必要なら「その他・管理 → 現在の診断を終了」で次のサイトへ進めます',
+      path:'必要なら「設定・管理 → 現在の診断を終了」で次のサイトへ進めます',
       tone:'GREEN'
     };
   }
@@ -2748,8 +2747,8 @@ function sdsdChooseOutputFolder() {
     currentFolderName:current.name,
     currentFolderUrl:current.url,
     currentIsDefault:current.isDefault
-  })).setWidth(760).setHeight(640);
-  SpreadsheetApp.getUi().showModalDialog(html, 'ZIP保存先を設定');
+  })).setWidth(760).setHeight(560);
+  SpreadsheetApp.getUi().showModalDialog(html, 'ZIP保存先');
 }
 
 function sdsdListOutputFolderPickerFolder(folderId) {
@@ -2798,11 +2797,11 @@ function sdsdOutputFolderPickerHtml_(o) {
   .success{display:none;background:#e6f4ea;border:1px solid #81c995;color:#137333;font-weight:bold}
   .card{background:#fff;border:1px solid #dadce0;border-radius:10px;margin-top:10px;padding:12px}.bar{display:flex;gap:8px;align-items:center}.where{flex:1;font-weight:bold;color:#174ea6}
   button{border:1px solid #dadce0;background:#fff;border-radius:6px;padding:8px 12px;cursor:pointer}button.primary{background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:bold}button:disabled{opacity:.55;cursor:default}
-  .list{height:245px;overflow:auto;border:1px solid #e0e0e0;border-radius:7px;margin-top:9px}.row{padding:9px 11px;border-bottom:1px solid #f1f3f4;cursor:pointer}.row:hover{background:#f8f9fa}
+  .list{height:175px;overflow:auto;border:1px solid #e0e0e0;border-radius:7px;margin-top:9px}.row{padding:9px 11px;border-bottom:1px solid #f1f3f4;cursor:pointer}.row:hover{background:#f8f9fa}
   .hint{color:#5f6368;font-size:12px;margin-top:7px}.err{color:#b3261e;margin-top:8px;white-space:pre-wrap}.actions{text-align:right;margin-top:12px}
   .url{font-size:11px;color:#5f6368;word-break:break-all;margin-top:3px}
   </style></head><body><div class="wrap">
-  <div class="hero"><h2>ZIP保存先を設定</h2><p>Evidence / Doctor Packageを保存するGoogle Driveフォルダーを選びます。</p></div>
+  <div class="hero"><h2>ZIP保存先</h2><p>Evidence / Doctor Packageを保存するGoogle Driveフォルダーを選びます。</p></div>
   <div class="saved">現在設定済みの保存先：<b id="savedName"></b><div id="savedUrl" class="url"></div></div>
   <div class="browse">いま表示中のフォルダー：<b id="browseName">読み込み中...</b></div>
   <div id="success" class="success"></div>
@@ -3270,7 +3269,7 @@ function sdsdShowCurrentSessionStatus() {
     `サイト横断Doctor案件: ${work.opportunityCases}件\n` +
     `Writer/Merge/Creator振り分け: ${work.actionableTreatment}件\n` +
     `追加Evidence待ち: ${work.additionalEvidence}件\n\n` +
-    '別サイトを診断する場合は、先に「その他・管理 → 現在の診断を終了」を実行してください。'
+    '別サイトを診断する場合は、先に「設定・管理 → 現在の診断を終了」を実行してください。'
   );
 }
 
@@ -3366,7 +3365,7 @@ function sdsdAssertNoActiveDiagnosisSessionBeforeImport_() {
     '現在の診断セッションが残っています。\n\n' +
     `対象サイト: ${session.siteId || session.host || '判定できません'}\n` +
     `診断候補: ${work.candidates}件 / 要確認作業: ${work.pendingTotal}件\n\n` +
-    '別のEvidenceを読み込む前に、メニュー「その他・管理 → 現在の診断を終了」を実行してください。\n' +
+    '別のEvidenceを読み込む前に、メニュー「設定・管理 → 現在の診断を終了」を実行してください。\n' +
     'これにより、別サイトのデータが混在することを防ぎます。'
   );
 }
