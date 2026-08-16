@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.7.2';
+const SDSD_VERSION = '0.7.3';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -1651,7 +1651,20 @@ function sdsdBuildSbmSiteDiagnosisHandoff_() {
       internal_link_recommendations: Array.isArray(c.internal_link_recommendations)
         ? c.internal_link_recommendations : [],
       presentation: c.presentation || null,
-      creator_plan: sourceRoute === 'CREATOR' ? (c.creator_plan || null) : null
+      creator_plan: sourceRoute === 'CREATOR' ? (c.creator_plan || null) : null,
+      new_article_target: sourceRoute === 'CREATOR'
+        ? (c.new_article_target || (c.creator_plan && c.creator_plan.new_article_target) || null)
+        : null,
+      reference_articles: sourceRoute === 'CREATOR'
+        ? (Array.isArray(c.reference_articles) ? c.reference_articles : articles)
+        : [],
+      article_identity_semantics: sourceRoute === 'CREATOR'
+        ? {
+            primary_target_type:'NEW_ARTICLE',
+            legacy_bridge_articles_are_reference_only:true,
+            legacy_bridge_identity_role:'REFERENCE_ONLY'
+          }
+        : null
     };
 
     if (sourceRoute === 'MERGE') {
@@ -6505,8 +6518,22 @@ function sdsdApplyCreatorSerpResult_(doctorResult) {
     c.doctor_decision = 'CREATOR_APPROVED_AFTER_SERP_CHECK';
     c.treatment_strategy = 'CREATE_NEW_ARTICLE_AND_MONITOR';
     c.reason = String(doctorResult.new_article_reason || doctorResult.role_with_existing_articles || c.reason || '');
+    const creatorKeyword = String(doctorResult.candidate_keyword || local.candidate_query || c.diagnosis_theme || '');
+    const creatorReferenceArticles = (Array.isArray(c.target_articles) ? c.target_articles : []).map(a => {
+      if (typeof a === 'string') return {article_url:String(a), role:'REFERENCE_ONLY'};
+      return Object.assign({}, a || {}, {role:'REFERENCE_ONLY'});
+    });
+    c.target_articles = creatorReferenceArticles; // legacy SBM identity compatibility only
+    c.reference_articles = creatorReferenceArticles;
+    c.new_article_target = {
+      target_type:'NEW_ARTICLE',
+      candidate_keyword:creatorKeyword,
+      article_id:'',
+      article_url:'',
+      publication_status:'NOT_PUBLISHED'
+    };
     c.creator_plan = {
-      candidate_keyword: String(doctorResult.candidate_keyword || local.candidate_query || c.diagnosis_theme || ''),
+      candidate_keyword: creatorKeyword,
       keyword_cluster: String(local.keyword_cluster || ''),
       cluster_queries: local.cluster_queries || [],
       search_intent: String(doctorResult.search_intent || ''),
@@ -6520,7 +6547,10 @@ function sdsdApplyCreatorSerpResult_(doctorResult) {
       closest_existing_articles: closest,
       local_gate: String(local.grade || ''),
       monitor_days: monitorDays,
-      post_publish_policy: '公開後はSBMで約30日を初回評価点としてモニター。データ不足ならMONITOR延長。重大なカニバリが確認された場合はDoctor/Writer/Mergeへ再診断。'
+      post_publish_policy: '公開後はSBMで約30日を初回評価点としてモニター。データ不足ならMONITOR延長。重大なカニバリが確認された場合はDoctor/Writer/Mergeへ再診断。',
+      new_article_target: c.new_article_target,
+      reference_articles: creatorReferenceArticles,
+      bridge_identity_policy:'REFERENCE_ARTICLE_FOR_LEGACY_SBM_IDENTITY_ONLY'
     };
   } else if (decision === 'WRITER') {
     if (!closest.length || !String(closest[0].article_url || '')) {
@@ -7429,11 +7459,13 @@ function sdsdWriteTreatmentPlan_(obj) {
     c.route_to === 'NEEDS_EVIDENCE' && sdsdEvidencePurpose_(c) === 'CREATOR_VALIDATION'
       ? '新記事作成前チェック'
       : (routeJa[c.route_to] || c.route_to),
-    (c.target_articles || []).map(a => {
-      if (typeof a === 'string') return a;
-      return [a.article_id,a.article_title,a.article_url]
-        .filter(Boolean).join(' / ');
-    }).join('\n'),
+    c.route_to === 'CREATOR'
+      ? `新規記事（未発行） / キーワード: ${String((c.new_article_target && c.new_article_target.candidate_keyword) || (c.creator_plan && c.creator_plan.candidate_keyword) || c.diagnosis_theme || '')}`
+      : (c.target_articles || []).map(a => {
+          if (typeof a === 'string') return a;
+          return [a.article_id,a.article_title,a.article_url]
+            .filter(Boolean).join(' / ');
+        }).join('\n'),
     c.route_to === 'MERGE' ? String(c.merge_survivor || '') : '',
     c.route_to === 'MERGE' ? String(c.merge_absorbed || '') : '',
     c.route_to === 'MERGE' ? String(c.merge_direction || '') : '',
@@ -8215,6 +8247,13 @@ function sdsdPromoteSelectedLongtailCandidateToCreator() {
   const internalLinksText = String(values[10] || '');
   const internalLinks = internalLinksText.split('\n').map(line => line.trim()).filter(Boolean).map(line => ({note:line}));
   const targetArticles = Array.isArray(source.target_articles) ? source.target_articles : [];
+  // v0.7.3: These are existing articles used only as reference/identity evidence.
+  // They are NOT the new Creator article itself. Keep them for backward-compatible
+  // SBM identity verification, but separate their semantic role explicitly.
+  const referenceArticles = targetArticles.map(a => {
+    if (typeof a === 'string') return {article_url:String(a), role:'REFERENCE_ONLY'};
+    return Object.assign({}, a || {}, {role:'REFERENCE_ONLY'});
+  });
   // The parent NEEDS_EVIDENCE case is now resolved by this derived Creator case.
   // Keep the original case for traceability, but exclude it from future Creator validation.
   source.creator_validation_status = 'RESOLVED_TO_LONGTAIL_CREATOR';
@@ -8227,7 +8266,17 @@ function sdsdPromoteSelectedLongtailCandidateToCreator() {
     diagnosis_theme:keyword,
     diagnosis_type:'LONGTAIL_DISCOVERY_CREATOR',
     absorbed_source_case_ids:[sourceCaseId],
-    target_articles:targetArticles,
+    // Compatibility identity only. Site Diagnosis UI and the explicit Creator fields
+    // below treat the new article as the true target.
+    target_articles:referenceArticles,
+    reference_articles:referenceArticles,
+    new_article_target:{
+      target_type:'NEW_ARTICLE',
+      candidate_keyword:keyword,
+      article_id:'',
+      article_url:'',
+      publication_status:'NOT_PUBLISHED'
+    },
     doctor_decision:'CREATOR_APPROVED_AFTER_LONGTAIL_DISCOVERY',
     confidence:String(values[11] || ''),
     site_impact:'成長機会',
@@ -8249,7 +8298,14 @@ function sdsdPromoteSelectedLongtailCandidateToCreator() {
       internal_link_candidates:internalLinks,
       monitor_days:parseInt(String(values[12] || '30').replace(/\D/g,''),10) || 30,
       post_publish_policy:'公開後はSBMで約30日を初回評価点としてモニター。データ不足ならMONITOR延長。重大なカニバリが確認された場合はDoctor/Writer/Mergeへ再診断。',
-      discovery_source:'SIMS_DOCTOR_LONGTAIL_DISCOVERY_RESULT_V1'
+      discovery_source:'SIMS_DOCTOR_LONGTAIL_DISCOVERY_RESULT_V1',
+      new_article_target:{
+        target_type:'NEW_ARTICLE',
+        candidate_keyword:keyword,
+        publication_status:'NOT_PUBLISHED'
+      },
+      reference_articles:referenceArticles,
+      bridge_identity_policy:'REFERENCE_ARTICLE_FOR_LEGACY_SBM_IDENTITY_ONLY'
     }
   };
   stored.diagnosis_cases = (stored.diagnosis_cases || []).concat([c]);

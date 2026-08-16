@@ -1,12 +1,15 @@
-# SIMS Doctor Site Diagnosis v0.7.2
+# SIMS Doctor Site Diagnosis v0.7.3
 
-PATCH for SBM handoff priority in the Creator long-tail workflow.
+PATCH for Creator new-article identity semantics at the Site Diagnosis -> SBM handoff boundary.
 
 ## Apps Script replacement
 - Replace: `Code.gs`
-- No other Apps Script files are required for this patch.
+- No other Apps Script files are required.
 
 ## Main fix
-When at least one Writer / Merge / Creator treatment is finalized, `▶ 次に進む` now prioritizes the SBM handoff before continuing unresolved Creator candidates. After the current handoff is completed, remaining YELLOW Creator candidates can be resumed.
+A Creator long-tail case no longer presents an existing related article as the actual `対象記事` in Site Diagnosis. The treatment plan now shows the true target as a not-yet-published new article and its candidate keyword.
 
-v0.7.2 also fingerprints the completed SBM payload. This makes an older session with a newly-added Creator case automatically require a fresh handoff, while preventing the same unchanged payload from being requested repeatedly.
+For backward compatibility with the current SBM identity verification, existing related articles are still carried only as reference/bridge identity data. v0.7.3 marks that role explicitly with `REFERENCE_ONLY`, adds `new_article_target`, `reference_articles`, and `article_identity_semantics`, and keeps the existing bridge payload usable until SBM consumes the new semantics directly.
+
+## Version consistency
+`Code.gs`, `VERSION`, README, CHANGELOG, and release notes are aligned to v0.7.3.
