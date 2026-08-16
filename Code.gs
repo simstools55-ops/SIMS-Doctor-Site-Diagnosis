@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.6.5';
+const SDSD_VERSION = '0.7.0';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -20,7 +20,8 @@ const SDSD_CONFIG = Object.freeze({
     treatmentPlan: 'サイト治療計画',
     siteWideResultImport: 'Doctor結果取込',
     creatorValidation: 'Creator候補チェック',
-    creatorSerpReferral: 'Creator SERP確認'
+    creatorSerpReferral: 'Creator SERP確認',
+    longtailDiscovery: 'ロングテール探索'
   },
   score: {
     demandMax: 30,
@@ -45,7 +46,11 @@ function onOpen() {
     .addSeparator()
     .addItem('Creator候補チェックを見る', 'sdsdOpenCreatorValidation')
     .addItem('Creator SERP確認紹介状を見る', 'sdsdOpenCreatorSerpReferral')
-    .addItem('Creator SERP Doctor回答を取り込む', 'sdsdShowCreatorSerpResultDialog');
+    .addItem('Creator SERP Doctor回答を取り込む', 'sdsdShowCreatorSerpResultDialog')
+    .addSeparator()
+    .addItem('ロングテール探索を見る', 'sdsdOpenLongtailDiscovery')
+    .addItem('Doctorロングテール探索結果を取り込む', 'sdsdShowLongtailDiscoveryResultDialog')
+    .addItem('選択したロングテール候補をCreator案件にする', 'sdsdPromoteSelectedLongtailCandidateToCreator');
 
   const manualMenu = ui.createMenu('保守・復旧操作')
     .addItem('Evidence Packageを読み込む', 'sdsdImportEvidencePackageZip')
@@ -61,6 +66,9 @@ function onOpen() {
     .addItem('Creator候補：作成前チェックを実行', 'sdsdRunCreatorCandidateValidation')
     .addItem('Creator候補：選択案件のSERP確認紹介状を作成', 'sdsdCreateCreatorSerpReferralFromSelected')
     .addItem('Creator候補：Doctor SERP結果を登録', 'sdsdShowCreatorSerpResultDialog')
+    .addItem('Creator候補：選択案件のロングテール探索紹介状を作成', 'sdsdCreateLongtailDiscoveryReferralFromSelected')
+    .addItem('Creator候補：Doctorロングテール探索結果を登録', 'sdsdShowLongtailDiscoveryResultDialog')
+    .addItem('Creator候補：選択ロングテールをCreator案件に登録', 'sdsdPromoteSelectedLongtailCandidateToCreator')
     .addItem('横断診断：選択中のMerge紹介状を作成', 'sdsdCreateMergeReferralFromSelectedTreatment')
     .addSeparator()
     .addItem('Article Master（任意）の案内', 'sdsdArticleMasterImportHelp')
@@ -7862,4 +7870,298 @@ function sdsdValidateWeeklyTrends() {
     '4パターン回帰検証表を作成しました。\n' +
     'Weekly Trend Validation シートを確認してください。'
   );
+}
+
+
+// ============================================================================
+// v0.7.0 Creator Long-tail Discovery
+// Existing query clusters -> unexplored long-tail discovery -> Creator handoff.
+// Doctor performs live SERP discovery/validation; Diagnosis preserves site/GSC context.
+// ============================================================================
+
+function sdsdLongtailDiscoveryState_() {
+  const p = PropertiesService.getDocumentProperties();
+  return {
+    status: String(p.getProperty('SDSD_LONGTAIL_DISCOVERY_STATUS') || ''),
+    caseId: String(p.getProperty('SDSD_LONGTAIL_DISCOVERY_CASE_ID') || '')
+  };
+}
+
+function sdsdSetLongtailDiscoveryState_(status, caseId) {
+  const p = PropertiesService.getDocumentProperties();
+  p.setProperty('SDSD_LONGTAIL_DISCOVERY_STATUS', String(status || ''));
+  p.setProperty('SDSD_LONGTAIL_DISCOVERY_CASE_ID', String(caseId || ''));
+  p.setProperty('SDSD_LONGTAIL_DISCOVERY_AT', new Date().toISOString());
+}
+
+function sdsdClearLongtailDiscoveryState_() {
+  const p = PropertiesService.getDocumentProperties();
+  ['SDSD_LONGTAIL_DISCOVERY_STATUS','SDSD_LONGTAIL_DISCOVERY_CASE_ID','SDSD_LONGTAIL_DISCOVERY_AT']
+    .forEach(k => p.deleteProperty(k));
+}
+
+function sdsdBuildLongtailDiscoveryReferralObject_(selected) {
+  const v = selected.validation || {};
+  const siteResult = sdsdReadStoredSiteWideResult_();
+  const existingQueries = (v.cluster_queries || []).map(x => String(x.query || '')).filter(Boolean);
+  const existingUrls = Array.from(new Set((v.internal_link_candidates || []).map(x => x.article_url).filter(Boolean)));
+  return {
+    format: 'SIMS_DOCTOR_LONGTAIL_DISCOVERY_REFERRAL_V1',
+    contract_version: '1.0',
+    site_diagnosis_batch_id: String(siteResult.site_diagnosis_batch_id || ''),
+    site: siteResult.site || {},
+    source_diagnosis_case_id: String(v.diagnosis_case_id || ''),
+    source_keyword: String(v.candidate_query || v.diagnosis_theme || ''),
+    keyword_cluster: String(v.keyword_cluster || ''),
+    local_gate: String(v.grade || ''),
+    local_reason: String(v.reason || ''),
+    existing_cluster_queries: v.cluster_queries || [],
+    existing_query_strings: existingQueries,
+    closest_existing_articles: v.closest_articles || [],
+    internal_link_candidates: v.internal_link_candidates || [],
+    existing_article_urls: existingUrls,
+    discovery_policy: {
+      objective: '既存キーワードクラスターから、既存記事がまだ主担当していない「＋1語」を中心とするロングテール検索意図を発見する',
+      rules: [
+        'source_keywordそのもの・語順違い・単純な年号違いだけの候補は除外する',
+        '既存GSCクエリと実質同一の候補は除外する',
+        '検索意図を具体化する追加語（対象、状況、悩み、行動、比較、失敗、年代、場所など）を優先する',
+        '実際のSERPを確認し、元キーワードと上位ページ/回答内容が十分に分離する候補だけCREATOR候補とする',
+        '明確な同一意図・重大なカニバリがある候補はBLOCKする',
+        '多少の不確実性は許容し、独立性がMEDIUM以上なら30日モニター前提でCREATORを許可してよい',
+        '候補は最大5件。価値のある候補がなければ0件で返してよい'
+      ]
+    },
+    required_response_format: 'SIMS_DOCTOR_LONGTAIL_DISCOVERY_RESULT_V1'
+  };
+}
+
+function sdsdBuildLongtailDiscoveryReferralMarkdown_(o) {
+  return [
+    '# SIMS Doctor ロングテール探索紹介状',
+    '',
+    `元案件ID: ${o.source_diagnosis_case_id}`,
+    `元キーワード: ${o.source_keyword}`,
+    `キーワードクラスター: ${o.keyword_cluster}`,
+    `Diagnosis判定: ${o.local_gate}`,
+    '',
+    '## 目的',
+    '既存記事と同じキーワードをもう1本作るのではなく、既存クラスターから「＋1語」を中心に未開拓の検索意図を探してください。',
+    '候補は実SERPで独立性を確認し、カニバリを避けつつ、個人ブログとして試す価値のあるロングテールを優先します。',
+    '',
+    '## 既存クラスターGSCクエリ',
+    ...(o.existing_cluster_queries || []).map(x => `- ${x.query || ''} | ${x.article_url || ''} | imp=${x.impressions || 0} | pos=${x.position || 0}`),
+    '',
+    '## 近い既存記事',
+    ...(o.closest_existing_articles || []).map(x => `- ${x.article_title || ''} | ${x.main_query || ''} | ${x.article_url || ''}`),
+    '',
+    '## Doctorへの依頼',
+    ...((o.discovery_policy && o.discovery_policy.rules) || []).map(x => `- ${x}`),
+    '',
+    '## 返却JSON例',
+    '```json',
+    JSON.stringify({
+      format:'SIMS_DOCTOR_LONGTAIL_DISCOVERY_RESULT_V1',
+      source_diagnosis_case_id:o.source_diagnosis_case_id,
+      source_keyword:o.source_keyword,
+      candidates:[{
+        candidate_keyword:'',
+        added_intent_term:'',
+        decision:'CREATOR|BLOCK|WRITER',
+        serp_independence:'HIGH|MEDIUM|LOW',
+        search_intent:'',
+        competitor_summary:'',
+        role_with_existing_articles:'',
+        do_not_target:[],
+        internal_link_recommendations:[],
+        new_article_reason:'',
+        monitor_days:30,
+        confidence:0
+      }],
+      overall_note:''
+    }, null, 2),
+    '```'
+  ].join('\n');
+}
+
+function sdsdWriteLongtailDiscoveryReferralSheet_(o) {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(SDSD_CONFIG.sheets.longtailDiscovery);
+  if (!sh) sh = ss.insertSheet(SDSD_CONFIG.sheets.longtailDiscovery);
+  sh.clear();
+  const md = sdsdBuildLongtailDiscoveryReferralMarkdown_(o);
+  const rows = [
+    ['ロングテール探索','Doctor紹介状'],
+    ['元案件ID',o.source_diagnosis_case_id],
+    ['元キーワード',o.source_keyword],
+    ['キーワードクラスター',o.keyword_cluster],
+    ['Diagnosis判定',o.local_gate],
+    ['Doctorへ渡す紹介状（Markdown）',md],
+    ['Doctorへ渡す紹介状（JSON）',JSON.stringify(o,null,2)]
+  ];
+  sh.getRange(1,1,rows.length,2).setValues(rows);
+  sh.getRange(1,1,rows.length,2).setWrap(true).setVerticalAlignment('top');
+  sh.getRange(1,1,1,2).setFontWeight('bold');
+  sh.setColumnWidth(1,270); sh.setColumnWidth(2,900);
+  ss.setActiveSheet(sh);
+}
+
+function sdsdCreateLongtailDiscoveryReferralFromSelected() {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    const selected = sdsdSelectedCreatorValidation_();
+    const referral = sdsdBuildLongtailDiscoveryReferralObject_(selected);
+    sdsdWriteLongtailDiscoveryReferralSheet_(referral);
+    sdsdSetLongtailDiscoveryState_('WAITING_DOCTOR_RESULT', referral.source_diagnosis_case_id);
+    ui.alert(
+      'ロングテール探索紹介状を作成しました。\n\n' +
+      `元キーワード: ${referral.source_keyword}\n\n` +
+      '何のため？：既存記事と同じ意図を増やさず、既存キーワードに意味のある「＋1語」を加えた未開拓検索意図を探します。\n' +
+      '次の操作：「ロングテール探索」シートのMarkdownまたはJSONをSIMS Doctorへ渡してください。\n' +
+      'Doctor回答が返ったら「確認する → Doctorロングテール探索結果を取り込む」から貼り付けてください。'
+    );
+    return referral;
+  } catch(e) {
+    ui.alert('ロングテール探索紹介状を作成できませんでした。\n\n' + String(e && e.message ? e.message : e));
+    throw e;
+  }
+}
+
+function sdsdValidateLongtailDiscoveryResult_(o) {
+  if (!o || o.format !== 'SIMS_DOCTOR_LONGTAIL_DISCOVERY_RESULT_V1') {
+    throw new Error('Doctor結果のformatがSIMS_DOCTOR_LONGTAIL_DISCOVERY_RESULT_V1ではありません。');
+  }
+  if (!String(o.source_diagnosis_case_id || '').trim()) throw new Error('source_diagnosis_case_idがありません。');
+  if (!Array.isArray(o.candidates)) throw new Error('candidates配列がありません。');
+  o.candidates.forEach((c,i) => {
+    if (!String(c.candidate_keyword || '').trim()) throw new Error(`candidates[${i}].candidate_keywordがありません。`);
+    const d = String(c.decision || '').toUpperCase();
+    if (!['CREATOR','BLOCK','WRITER'].includes(d)) throw new Error(`candidates[${i}].decisionはCREATOR / BLOCK / WRITERで返してください。`);
+  });
+  return true;
+}
+
+function sdsdWriteLongtailDiscoveryResultSheet_(o) {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(SDSD_CONFIG.sheets.longtailDiscovery);
+  if (!sh) sh = ss.insertSheet(SDSD_CONFIG.sheets.longtailDiscovery);
+  sh.clear();
+  const headers = ['元案件ID','元キーワード','候補キーワード','追加意図語','判定','SERP独立性','検索意図','新記事作成理由','既存記事との役割分担','狙わない検索意図','内部リンク候補','確信度','モニター'];
+  const rows = (o.candidates || []).map(c => [
+    String(o.source_diagnosis_case_id || ''),
+    String(o.source_keyword || ''),
+    String(c.candidate_keyword || ''),
+    String(c.added_intent_term || ''),
+    String(c.decision || '').toUpperCase(),
+    String(c.serp_independence || ''),
+    String(c.search_intent || ''),
+    String(c.new_article_reason || ''),
+    String(c.role_with_existing_articles || ''),
+    Array.isArray(c.do_not_target) ? c.do_not_target.join(' / ') : '',
+    Array.isArray(c.internal_link_recommendations) ? c.internal_link_recommendations.map(x => `${x.title || ''} / ${x.url || x.article_url || ''} / ${x.reason || ''}`).join('\n') : '',
+    Number(c.confidence || 0),
+    Number(c.monitor_days || 30) + '日'
+  ]);
+  sh.getRange(1,1,1,headers.length).setValues([headers]);
+  if (rows.length) sh.getRange(2,1,rows.length,headers.length).setValues(rows);
+  sh.setFrozenRows(1);
+  sh.getRange(1,1,1,headers.length).setFontWeight('bold');
+  sh.getRange(1,1,Math.max(rows.length+1,1),headers.length).setWrap(true).setVerticalAlignment('top');
+  [190,220,250,160,100,120,360,420,420,300,480,90,100].forEach((w,i) => sh.setColumnWidth(i+1,w));
+  ss.setActiveSheet(sh);
+}
+
+function sdsdRegisterLongtailDiscoveryResult(text) {
+  const o = sdsdExtractJsonObject_(String(text || ''));
+  sdsdValidateLongtailDiscoveryResult_(o);
+  sdsdWriteLongtailDiscoveryResultSheet_(o);
+  sdsdClearLongtailDiscoveryState_();
+  return {count:o.candidates.length, creator_count:o.candidates.filter(x => String(x.decision||'').toUpperCase()==='CREATOR').length};
+}
+
+function sdsdShowLongtailDiscoveryResultDialog() {
+  const state = sdsdLongtailDiscoveryState_();
+  const caseLabel = state.caseId ? `対象案件: ${state.caseId}` : '対象案件: JSON内のsource_diagnosis_case_idで照合します';
+  const html = '<!doctype html><html><head><base target="_top"><meta charset="UTF-8"><style>'+
+    'body{font-family:Arial,"Noto Sans JP",sans-serif;padding:18px;background:#f8f9fa;color:#202124}h2{margin:0 0 6px;font-size:18px}.flow{background:#e8f0fe;color:#174ea6;padding:9px 11px;border-radius:7px;font-weight:700;font-size:12px;margin-bottom:10px}.why{font-size:13px;line-height:1.7;background:#fff;padding:10px;border-radius:7px;margin-bottom:10px}.case{font-size:12px;color:#5f6368;margin-bottom:8px}textarea{box-sizing:border-box;width:100%;height:330px;padding:10px;font:12px/1.45 monospace;border:1px solid #bdc1c6;border-radius:7px;background:#fff}.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}button{padding:9px 15px;border:0;border-radius:6px;font-weight:700;cursor:pointer}.primary{background:#1a73e8;color:#fff}.secondary{background:#e8eaed;color:#202124}.status{font-size:12px;margin-top:8px;color:#137333;white-space:pre-wrap}</style></head><body>'+
+    '<h2>Doctorのロングテール探索結果を取り込む</h2><div class="flow">既存KWクラスター → Doctor（＋1語探索・SERP確認）→ Diagnosis → SBM → Creator</div>'+
+    '<div class="why"><b>何のため？</b><br>既存記事と競合しない未開拓ロングテール候補を取り込み、CREATOR候補を一覧化します。候補が0件でも正常です。</div><div class="case">'+caseLabel.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>'+
+    '<textarea id="t" placeholder="Doctor回答全文またはSIMS_DOCTOR_LONGTAIL_DISCOVERY_RESULT_V1 JSONを貼り付け"></textarea><div class="status" id="s"></div><div class="actions"><button class="secondary" onclick="google.script.host.close()">キャンセル</button><button class="primary" id="go">探索結果を取り込む</button></div>'+
+    '<script>document.getElementById("go").onclick=()=>{const t=document.getElementById("t").value.trim(),b=document.getElementById("go"),s=document.getElementById("s");if(!t){s.textContent="Doctor回答を貼り付けてください。";return;}b.disabled=true;s.textContent="取り込んでいます...";google.script.run.withSuccessHandler(r=>{s.textContent="取り込み完了：候補 "+r.count+"件 / CREATOR "+r.creator_count+"件";setTimeout(()=>google.script.host.close(),1000);}).withFailureHandler(e=>{b.disabled=false;s.textContent=(e&&e.message)?e.message:String(e||"エラー");}).sdsdRegisterLongtailDiscoveryResult(t);};</script></body></html>';
+  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(html).setWidth(760).setHeight(560),'ロングテール探索結果の取込');
+}
+
+function sdsdOpenLongtailDiscovery() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName(SDSD_CONFIG.sheets.longtailDiscovery);
+  if (!sh) {
+    SpreadsheetApp.getUi().alert(
+      'ロングテール探索はまだ作成されていません。\n\n' +
+      '「Creator候補チェック」でYELLOW案件を選択し、\n' +
+      '設定・管理 → 保守・復旧操作 → Creator候補：選択案件のロングテール探索紹介状を作成\n' +
+      'を実行してください。'
+    );
+    return;
+  }
+  ss.setActiveSheet(sh);
+}
+
+function sdsdPromoteSelectedLongtailCandidateToCreator() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getActiveSheet();
+  if (!sh || sh.getName() !== SDSD_CONFIG.sheets.longtailDiscovery) throw new Error('「ロングテール探索」シートでCREATOR候補の行を選択してください。');
+  const row = sh.getActiveRange().getRow();
+  if (row < 2) throw new Error('見出しではなく候補行を選択してください。');
+  const values = sh.getRange(row,1,1,13).getValues()[0];
+  const sourceCaseId = String(values[0] || '').trim();
+  const sourceKeyword = String(values[1] || '').trim();
+  const keyword = String(values[2] || '').trim();
+  const decision = String(values[4] || '').toUpperCase();
+  if (decision !== 'CREATOR') throw new Error('CREATOR判定の候補だけをSBM引き渡し対象にできます。');
+  const stored = sdsdReadStoredSiteWideResult_();
+  const source = (stored.diagnosis_cases || []).find(c => String(c.diagnosis_case_id || '') === sourceCaseId);
+  if (!source) throw new Error('元案件を保存済みサイト治療計画から確認できません。');
+  const slug = Utilities.base64EncodeWebSafe(keyword).replace(/[^A-Za-z0-9]/g,'').slice(0,10) || String(new Date().getTime());
+  const newCaseId = `${sourceCaseId}-LT-${slug}`;
+  const existing = (stored.diagnosis_cases || []).find(c => String(c.diagnosis_case_id || '') === newCaseId);
+  if (existing) throw new Error('このロングテール候補はすでにCreator案件として登録されています。');
+  const internalLinksText = String(values[10] || '');
+  const internalLinks = internalLinksText.split('\n').map(line => line.trim()).filter(Boolean).map(line => ({note:line}));
+  const targetArticles = Array.isArray(source.target_articles) ? source.target_articles : [];
+  const c = {
+    diagnosis_case_id:newCaseId,
+    diagnosis_theme:keyword,
+    diagnosis_type:'LONGTAIL_DISCOVERY_CREATOR',
+    absorbed_source_case_ids:[sourceCaseId],
+    target_articles:targetArticles,
+    doctor_decision:'CREATOR_APPROVED_AFTER_LONGTAIL_DISCOVERY',
+    confidence:String(values[11] || ''),
+    site_impact:'成長機会',
+    treatment_strategy:'CREATE_NEW_ARTICLE_AND_MONITOR',
+    route_to:'CREATOR',
+    eventual_route:'CREATOR',
+    reason:String(values[7] || ''),
+    additional_evidence_needed:[],
+    internal_link_recommendations:internalLinks,
+    creator_plan:{
+      candidate_keyword:keyword,
+      source_keyword:sourceKeyword,
+      added_intent_term:String(values[3] || ''),
+      search_intent:String(values[6] || ''),
+      serp_independence:String(values[5] || ''),
+      new_article_reason:String(values[7] || ''),
+      role_with_existing_articles:String(values[8] || ''),
+      do_not_target:String(values[9] || '').split(' / ').filter(Boolean),
+      internal_link_candidates:internalLinks,
+      monitor_days:parseInt(String(values[12] || '30').replace(/\D/g,''),10) || 30,
+      post_publish_policy:'公開後はSBMで約30日を初回評価点としてモニター。データ不足ならMONITOR延長。重大なカニバリが確認された場合はDoctor/Writer/Mergeへ再診断。',
+      discovery_source:'SIMS_DOCTOR_LONGTAIL_DISCOVERY_RESULT_V1'
+    }
+  };
+  stored.diagnosis_cases = (stored.diagnosis_cases || []).concat([c]);
+  sdsdStoreSiteWideResult_(stored);
+  sdsdWriteTreatmentPlan_(stored);
+  try { sdsdRenderHome_(); } catch(e) {}
+  SpreadsheetApp.getUi().alert(`Creator案件として登録しました。\n\n候補キーワード: ${keyword}\n次はSite DiagnosisからSBMへ引き渡してください。`);
+  return c;
 }

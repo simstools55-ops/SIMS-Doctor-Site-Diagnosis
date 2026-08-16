@@ -1,3 +1,10 @@
+## 0.7.0
+
+- Added Creator long-tail discovery from existing keyword clusters.
+- Added Doctor referral/result contracts for live SERP discovery of meaningful +1-word or narrowed-intent queries.
+- Added long-tail discovery sheet, result import UI, and promotion of Doctor-approved candidates into CREATOR cases for SBM handoff.
+- Preserved the v0.6.5 cannibalization gate; existing keyword ownership is not treated as a new-article opportunity.
+
 ## 0.6.5
 
 - Creator候補ゲートを追加補正。GSCに完全一致・強近似クエリがなくても、Doctor一次診断の `target_articles` に既存記事URLが存在する案件は最低YELLOWへ判定。

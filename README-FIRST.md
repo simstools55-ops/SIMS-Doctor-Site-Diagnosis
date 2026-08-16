@@ -1,4 +1,4 @@
-# SIMS Doctor Site Diagnosis v0.6.5
+# SIMS Doctor Site Diagnosis v0.7.0
 
 SIMS Doctor Site Diagnosis は、Collectorで収集したEvidenceを読み込み、サイト全体の診断、個別精密診断、横断診断、Doctorへの引き渡しまでを案内する診断ワークスペースです。
 
@@ -25,6 +25,10 @@ Evidence Package読込後はそのままサイト診断へ進め、Doctor Packag
 
 処理を進めるときは `▶ 次に進む（Diagnosisに任せる）`、結果を見るときは `確認する` を使うのが基本です。
 
+
+## ロングテール探索（v0.7.0）
+
+Creator候補の既存キーワードがすでに既存記事に担当されている場合、同じキーワードで新記事を増やしません。Creator候補チェックのYELLOW案件を起点に、Doctorへ「＋1語」を中心とした未開拓ロングテール探索を依頼できます。Doctorは実SERPを確認し、既存記事と検索意図が分離する候補だけをCREATOR候補として返します。価値のある候補が0件でも正常です。CREATOR候補は「ロングテール探索」シートから選択してCreator案件として登録し、SBMへ引き渡します。公開後は約30日を初回評価点としてモニターします。
 
 ## Creatorルート（v0.6.5）
 
