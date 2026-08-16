@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.8.1';
+const SDSD_VERSION = '0.8.2';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -210,11 +210,19 @@ function sdsdHomeGuide_(session,m,work,stored){
   }
 
   const individualPackage=sdsdGetIndividualDoctorPackageState_();
-  if(individualPackage.status==='WAITING_DOCTOR_RESULT' || individualPackage.status==='PACKAGE_READY_FOR_DOCTOR'){
+  if(individualPackage.status==='PACKAGE_READY_FOR_DOCTOR'){
+    return {
+      title:'生成済みPackageをDoctorへ渡してください',
+      reason:'個別精密診断Packageは生成済みです。再生成せず、SIMS Doctorへ渡して精密診断を依頼してください。',
+      path:'メニュー最上段 → 1. Site Diagnosisを進める',
+      tone:'YELLOW'
+    };
+  }
+  if(individualPackage.status==='WAITING_DOCTOR_RESULT'){
     return {
       title:'Doctor結果をSIMS-Blog-Managerへ登録してください',
-      reason:'個別精密診断Packageは生成済みです。Doctorから返った各記事の診断結果はSBMへ登録し、完了後にDiagnosisへ引き渡し完了を記録します。',
-      path:'メニュー最上段 → ▶ 次に進む（Diagnosisに任せる）',
+      reason:'個別精密診断はDoctorへ依頼済みです。返ってきた各記事の診断結果をSBMへ登録してください。',
+      path:'メニュー最上段 → 1. Site Diagnosisを進める',
       tone:'YELLOW'
     };
   }
@@ -1029,6 +1037,60 @@ function sdsdPendingSelectedCaseCount_() {
     if (!r.some(v => String(v || '').trim() !== '')) return false;
     return String(r[refIdx] || '') !== 'HANDED_OFF_TO_SBM';
   }).length;
+}
+
+
+function sdsdShowIndividualPackageReady_() {
+  const state=sdsdGetIndividualDoctorPackageState_();
+  const esc=sdsdWorkflowEsc_;
+  const fileName=String(state.fileName||'個別精密診断Package');
+  const fileUrl=String(state.fileUrl||'');
+  const count=Number(state.caseCount||0);
+  const link=fileUrl
+    ? `<a href="${esc(fileUrl)}" target="_blank" style="color:#1a73e8;font-weight:bold">Google DriveでPackageを開く</a>`
+    : '<span style="color:#5f6368">保存先URLを取得できませんでした。</span>';
+
+  const html=`<!doctype html><html><head><base target="_top"><style>
+    body{font-family:Arial,"Noto Sans JP",sans-serif;margin:0;background:#f8fafd;color:#202124}.wrap{padding:20px}
+    .hero{background:#185abc;color:#fff;border-radius:12px;padding:17px}.hero h2{margin:0 0 6px;font-size:20px}.hero p{margin:0;font-size:13px}
+    .card{background:#fff;border:1px solid #dadce0;border-radius:10px;padding:14px;margin-top:13px}.title{font-size:17px;font-weight:bold}
+    .text{font-size:13px;line-height:1.75;margin-top:8px}.file{background:#f1f3f4;border-radius:8px;padding:11px;margin-top:10px;font-size:13px}
+    .actions{text-align:right;margin-top:16px}button{border:1px solid #dadce0;background:#fff;border-radius:7px;padding:9px 13px;margin-left:6px;cursor:pointer}
+    .primary{background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:bold}
+  </style></head><body><div class="wrap">
+    <div class="hero"><h2>Doctorへ個別精密診断を依頼してください</h2><p>Packageは生成済みです。再生成する必要はありません。</p></div>
+    <div class="card"><div class="title">生成済みPackage</div><div class="text">対象：${count}記事</div>
+      <div class="file"><b>ファイル：</b>${esc(fileName)}<br><br>${link}</div></div>
+    <div class="card"><div class="title">次にすること</div><div class="text">
+      1. このPackageをSIMS Doctorへ渡して、個別精密診断を依頼してください。<br>
+      2. Doctorへ渡したら「Doctorへ依頼しました」を押してください。<br>
+      3. 回答が返ったら、各記事の診断結果をSBMへ登録します。
+    </div></div>
+    <div class="actions"><button onclick="google.script.host.close()">中断して閉じる</button>
+      <button class="primary" onclick="markRequested()">Doctorへ依頼しました</button></div>
+    <div id="status" style="font-size:12px;color:#5f6368;text-align:right;margin-top:8px"></div>
+  </div><script>
+    function markRequested(){
+      document.getElementById('status').textContent='状態を保存しています...';
+      google.script.run.withSuccessHandler(()=>google.script.host.close())
+        .withFailureHandler(e=>document.getElementById('status').textContent=(e&&e.message)?e.message:String(e))
+        .sdsdMarkIndividualDoctorRequested();
+    }
+  </script></body></html>`;
+  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(html).setWidth(690).setHeight(560),'個別精密診断Package');
+}
+
+function sdsdMarkIndividualDoctorRequested() {
+  const state=sdsdGetIndividualDoctorPackageState_();
+  if(!state || state.status!=='PACKAGE_READY_FOR_DOCTOR') throw new Error('Doctorへ渡す個別精密診断Packageが確認できません。');
+  sdsdSetIndividualDoctorPackageState_({
+    status:'WAITING_DOCTOR_RESULT',
+    batchId:state.batchId,
+    fileUrl:state.fileUrl,
+    fileName:state.fileName,
+    caseCount:state.caseCount
+  });
+  sdsdSetWorkflowState_({status:'WAIT_INDIVIDUAL'});
 }
 
 function sdsdShowIndividualDoctorResultWaiting_() {
@@ -2082,11 +2144,19 @@ function sdsdWorkflowStep_(route){
   }
 
   const individualPackage=sdsdGetIndividualDoctorPackageState_();
+  if(individualPackage.status==='PACKAGE_READY_FOR_DOCTOR'){
+    return {
+      code:'INDIVIDUAL_PACKAGE_READY',
+      title:'Doctorへ個別精密診断を依頼してください',
+      detail:`${Number(individualPackage.caseCount||0)}記事の精密診断Packageは生成済みです。${String(individualPackage.fileName||'生成済みPackage')} をSIMS Doctorへ渡してください。再生成する必要はありません。`,
+      button:'Packageと次の手順を確認する'
+    };
+  }
   if(individualPackage.status==='WAITING_DOCTOR_RESULT'){
     return {
       code:'WAIT_INDIVIDUAL',
-      title:'個別精密診断のDoctor結果待ちです',
-      detail:'個別記事のDoctor結果はSBMへ登録します。登録済みならDiagnosisに完了を記録します。',
+      title:'Doctorの個別精密診断結果を待っています',
+      detail:'Doctorへ依頼済みのPackageがあります。回答が返ったら、各記事の診断結果をSBMへ登録してください。',
       button:'登録状況を確認する'
     };
   }
@@ -2313,6 +2383,7 @@ function sdsdWorkflowAdvance(){
     case 'BUILD_OPPORTUNITIES':
       sdsdBuildSiteOpportunityCases();
       sdsdShowWorkflowProgressDialog_(); return;
+    case 'INDIVIDUAL_PACKAGE_READY': sdsdShowIndividualPackageReady_(); return;
     case 'WAIT_INDIVIDUAL': sdsdShowIndividualDoctorResultWaiting_(); return;
     case 'INDIVIDUAL_PRECISION': sdsdProceedIndividualPrecisionDiagnosis(); return;
     case 'ROUTE_COMPLETE': sdsdSwitchWorkflowRoute(); return;

@@ -1,21 +1,15 @@
-# SIMS Doctor Site Diagnosis v0.8.1 Patch
+# SIMS Doctor Site Diagnosis v0.8.2 Patch
 
-Base: v0.8.0
+Base: v0.8.1
 
-## P1 fix
-Individual precision diagnosis batch preparation now resumes correctly.
+Fixes the post-generation checkpoint for individual precision diagnosis.
 
-Previously every click rebuilt the selected treatment batch, clearing the three already
-prepared rows. This caused the progress to remain at 3/9 indefinitely.
+After a Doctor ZIP has been generated, `1. Site Diagnosisを進める` now recognizes
+`PACKAGE_READY_FOR_DOCTOR` before considering new eligible articles. It displays the
+existing filename and a Google Drive link and explicitly asks the user to give the ZIP
+to SIMS Doctor.
 
-v0.8.1 detects an unfinished selected-case batch and reuses it. A 9-case batch therefore
-progresses 3/9 -> 6/9 -> 9/9 instead of restarting at 3/9.
+`Doctorへ依頼しました` records the next checkpoint as `WAITING_DOCTOR_RESULT`.
 
-## UI improvements from the v0.8.0 field test
-- Resume dialog shows prepared / total / remaining counts.
-- The next button says how many remaining cases will be prepared.
-- Old `次に進む（Diagnosisに任せる）` wording is replaced by `1. Site Diagnosisを進める`.
-- After package creation, the UI explicitly instructs the user to give the ZIP to SIMS Doctor.
-- The progress dialog explains the relationship between all additional-Evidence cases and the current high-priority individual batch.
-
-No Doctor/SBM contract changes are included.
+This prevents accidental regeneration of the completed package and separates:
+package generated -> Doctor requested -> Doctor result / SBM registration.
