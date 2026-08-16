@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.6.0';
+const SDSD_VERSION = '0.6.1';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -194,6 +194,22 @@ function sdsdHomeGuide_(session,m,work,stored){
       path:'メニュー最上段 → ▶ 次に進む（Diagnosisに任せる）',
       tone:'YELLOW'
     };
+  }
+
+  // v0.6.1: Creator candidates take navigation priority over a legacy
+  // site-wide Precision package waiting state. The Precision state is preserved
+  // and can be resumed after Creator validation; it must not block Creator work.
+  if(stored){
+    const creatorPending=sdsdCreatorValidationCases_().length;
+    if(creatorPending>0){
+      const creatorSheet=SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.creatorValidation);
+      return {
+        title:creatorSheet ? '新記事候補のSERP確認を進めてください' : `新記事候補${creatorPending}件の作成前チェックを行います`,
+        reason:'既存記事との重大なカニバリだけを避け、独立したロングテール検索意図はCreator候補として前進させます。旧バージョンで生成済みの精密診断Packageは保持したまま後で再開できます。',
+        path:creatorSheet ? '確認する → Creator候補チェックを見る → 対象行を選択' : 'メニュー最上段 → ▶ 次に進む（Diagnosisに任せる）',
+        tone:'BLUE'
+      };
+    }
   }
 
   const precisionPackage=sdsdGetSiteWidePrecisionPackageState_();
@@ -1727,6 +1743,31 @@ function sdsdProceedNextGuided(){
       return;
     }
 
+    // v0.6.1 migration/navigation: Creator validation has priority over an
+    // already-generated legacy Precision package. Preserve that package state.
+    if(stored){
+      const creatorPending=sdsdCreatorValidationCases_().length;
+      if(creatorPending>0){
+        const creatorSheet=SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.creatorValidation);
+        if(!creatorSheet){
+          sdsdRunCreatorCandidateValidation();
+          return;
+        }
+        SpreadsheetApp.getActive().setActiveSheet(creatorSheet);
+        sdsdShowGuidedActionDialog_({
+          title:'Creator候補を確認します',
+          purpose:'既存記事との重大なカニバリを避けながら、独立したロングテール検索意図には積極的に挑戦する工程です。',
+          done:'Creator候補チェックは作成済みです。旧Precision Packageの待機状態は保持しているため、後から精密診断へ戻れます。',
+          next:'Creator候補チェックを開き、対象候補の行を選んでSERP確認紹介状を作成してください。',
+          primaryLabel:'Creator候補チェックを見る',
+          primaryFn:'sdsdOpenCreatorValidation',
+          secondaryLabel:'閉じる',
+          windowTitle:'新記事候補の作成前チェック'
+        });
+        return;
+      }
+    }
+
     const precisionPackage=sdsdGetSiteWidePrecisionPackageState_();
     if(precisionPackage.status==='WAITING_DOCTOR_RESULT'){
       sdsdShowSiteWidePrecisionResultWaiting_();
@@ -1749,22 +1790,6 @@ function sdsdProceedNextGuided(){
     }
 
     if(stored){
-      const creatorPending=sdsdCreatorValidationCases_().length;
-      if(creatorPending>0){
-        const creatorSheet=SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.creatorValidation);
-        if(!creatorSheet){
-          sdsdRunCreatorCandidateValidation();
-          return;
-        }
-        SpreadsheetApp.getActive().setActiveSheet(creatorSheet);
-        ui.alert(
-          '新記事候補の作成前チェックが必要です。\n\n' +
-          '目的：既存記事との重大なカニバリを避けつつ、独立したロングテール検索意図には積極的に挑戦します。\n\n' +
-          '次の操作：Creator候補チェックで1件を選び、\n' +
-          '「Creator候補：選択案件のSERP確認紹介状を作成」を実行してください。'
-        );
-        return;
-      }
       if(work.additionalEvidence>0){
         sdsdExportPriorityPrecisionClusterPackage();
         return;
@@ -6429,10 +6454,18 @@ function sdsdShowCreatorSerpResultDialog() {
 
 function sdsdOpenCreatorValidation() {
   const ss = SpreadsheetApp.getActive();
-  const sh = ss.getSheetByName(SDSD_CONFIG.sheets.creatorValidation);
+  let sh = ss.getSheetByName(SDSD_CONFIG.sheets.creatorValidation);
   if (!sh) {
-    SpreadsheetApp.getUi().alert('Creator候補チェックはまだ作成されていません。\n「Creator候補：作成前チェックを実行」を実行してください。');
-    return;
+    const pending = sdsdCreatorValidationCases_().length;
+    if (!pending) {
+      SpreadsheetApp.getUi().alert('現在、新記事作成前チェックの対象案件はありません。');
+      return;
+    }
+    // v0.6.1: migrate v0.5.x/v0.6.0 stored Doctor cases on demand instead of
+    // asking the user to find and run a separate maintenance/menu command.
+    sdsdRunCreatorCandidateValidation();
+    sh = ss.getSheetByName(SDSD_CONFIG.sheets.creatorValidation);
+    if (!sh) return;
   }
   ss.setActiveSheet(sh);
 }

@@ -1,3 +1,11 @@
+## v0.6.1
+
+- Fixed upgrade-state navigation so stored Creator candidates take priority over a legacy site-wide Precision package waiting state.
+- Existing Precision package state is preserved and can be resumed after Creator validation.
+- Opening Creator candidate checks now auto-generates the validation sheet from stored Doctor results when needed.
+- Added direct guided action from the Creator validation prompt instead of requiring a separate menu command.
+- Home guidance now points to Creator validation when Creator candidates remain.
+
 # v0.6.0
 
 - Separates Creator validation from ordinary site-wide precision diagnosis so `eventual_route = CREATOR` cases no longer enter the top-five precision cluster package.
