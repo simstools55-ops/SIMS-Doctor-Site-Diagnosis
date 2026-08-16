@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.5.7';
+const SDSD_VERSION = '0.5.8';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -1816,27 +1816,70 @@ function sdsdCreateProductCasePackage() {
 // Source: ArticleFetcher.gs
 // ============================================================================
 function sdsdFetchArticleEvidence_(url) {
-  const res = UrlFetchApp.fetch(url, {
+  const requestedUrl = String(url || '').trim();
+  const fetchOptions = {
     muteHttpExceptions: true,
-    followRedirects: true,
+    followRedirects: false,
     headers: {
-      'User-Agent': 'Mozilla/5.0 (compatible; SIMS-Doctor-Site-Diagnosis/0.3.1)'
+      'User-Agent': 'Mozilla/5.0 (compatible; SIMS-Doctor-Site-Diagnosis/0.5.8)'
     }
-  });
+  };
+  const redirectCodes = {301:true, 302:true, 303:true, 307:true, 308:true};
+  const maxRedirects = 5;
+  const redirectChain = [];
+  let currentUrl = requestedUrl;
+  let initialHttpStatus = 0;
+  let redirectTargetUrl = '';
+  let res = null;
+  let code = 0;
 
-  const code = res.getResponseCode();
-  if (code < 200 || code >= 400) {
-    return {
-      status: 'FETCH_ERROR',
-      httpStatus: code,
-      finalUrl: url,
-      title: '',
-      metaDescription: '',
-      canonicalUrl: '',
-      articleHtml: '',
-      pageHtml: '',
-      error: `HTTP ${code}`
-    };
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    res = UrlFetchApp.fetch(currentUrl, fetchOptions);
+    code = res.getResponseCode();
+    if (hop === 0) initialHttpStatus = code;
+
+    if (!redirectCodes[code]) break;
+
+    const location = sdsdGetResponseHeader_(res, 'Location');
+    if (!location) {
+      return sdsdFetchArticleError_(requestedUrl, initialHttpStatus, currentUrl, code,
+        redirectChain, redirectTargetUrl, `HTTP ${code}: Location header not found.`);
+    }
+
+    const nextUrl = sdsdResolveRedirectUrl_(currentUrl, location);
+    if (!nextUrl) {
+      return sdsdFetchArticleError_(requestedUrl, initialHttpStatus, currentUrl, code,
+        redirectChain, redirectTargetUrl, `HTTP ${code}: Invalid redirect target.`);
+    }
+    if (!redirectTargetUrl) redirectTargetUrl = nextUrl;
+
+    redirectChain.push({
+      from_url: currentUrl,
+      http_status: code,
+      to_url: nextUrl
+    });
+
+    if (redirectChain.some((x, i) => i < redirectChain.length - 1 &&
+        sdsdNormalizeUrl_(x.from_url) === sdsdNormalizeUrl_(nextUrl))) {
+      return sdsdFetchArticleError_(requestedUrl, initialHttpStatus, currentUrl, code,
+        redirectChain, redirectTargetUrl, 'Redirect loop detected.');
+    }
+
+    currentUrl = nextUrl;
+
+    if (hop === maxRedirects) {
+      return sdsdFetchArticleError_(requestedUrl, initialHttpStatus, currentUrl, code,
+        redirectChain, redirectTargetUrl, `Redirect chain exceeded ${maxRedirects} hops.`);
+    }
+  }
+
+  const finalUrl = currentUrl;
+  const finalHttpStatus = code;
+  const redirectDetected = redirectChain.length > 0;
+
+  if (finalHttpStatus < 200 || finalHttpStatus >= 400) {
+    return sdsdFetchArticleError_(requestedUrl, initialHttpStatus, finalUrl, finalHttpStatus,
+      redirectChain, redirectTargetUrl, `HTTP ${finalHttpStatus}`);
   }
 
   const html = res.getContentText();
@@ -1849,39 +1892,118 @@ function sdsdFetchArticleEvidence_(url) {
     sdsdFirstMatch_(html, /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["'][^>]*>/i) ||
     sdsdFirstMatch_(html, /<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["'][^>]*>/i);
 
+  const canonicalMatchesFinalUrl = Boolean(
+    canonicalUrl && sdsdNormalizeUrl_(canonicalUrl) === sdsdNormalizeUrl_(finalUrl)
+  );
+  const redirectCanonicalConsistent = Boolean(
+    redirectDetected && canonicalUrl && canonicalMatchesFinalUrl
+  );
+
   let articleHtml =
     sdsdFirstMatch_(html, /(<article\b[\s\S]*?<\/article>)/i) ||
     sdsdFirstMatch_(html, /(<div[^>]+class=["'][^"']*entry-content[^"']*["'][^>]*>[\s\S]*?<\/div>)/i) ||
     '';
 
+  const common = {
+    httpStatus: finalHttpStatus,
+    requestedUrl,
+    initialHttpStatus,
+    redirectDetected,
+    redirectTargetUrl,
+    redirectChain,
+    finalUrl,
+    finalHttpStatus,
+    canonicalUrl,
+    canonicalMatchesFinalUrl,
+    redirectCanonicalConsistent
+  };
+
   if (!articleHtml) {
-    // Fail visibly rather than pretending the whole page is the article body.
-    return {
+    return Object.assign({}, common, {
       status: 'BODY_NOT_FOUND',
-      httpStatus: code,
-      finalUrl: canonicalUrl || url,
       title,
       metaDescription,
-      canonicalUrl,
       articleHtml: '',
       pageHtml: '',
       error: 'Article body container not found.'
-    };
+    });
   }
 
-  return {
+  return Object.assign({}, common, {
     status: 'VALID',
-    httpStatus: code,
-    finalUrl: canonicalUrl || url,
     title,
     metaDescription,
-    canonicalUrl,
     articleHtml,
     pageHtml: '',
     error: ''
+  });
+}
+
+function sdsdFetchArticleError_(requestedUrl, initialHttpStatus, finalUrl, finalHttpStatus,
+  redirectChain, redirectTargetUrl, error) {
+  return {
+    status: 'FETCH_ERROR',
+    httpStatus: finalHttpStatus,
+    requestedUrl: requestedUrl,
+    initialHttpStatus: initialHttpStatus,
+    redirectDetected: Array.isArray(redirectChain) && redirectChain.length > 0,
+    redirectTargetUrl: redirectTargetUrl || '',
+    redirectChain: redirectChain || [],
+    finalUrl: finalUrl || requestedUrl,
+    finalHttpStatus: finalHttpStatus,
+    title: '',
+    metaDescription: '',
+    canonicalUrl: '',
+    canonicalMatchesFinalUrl: false,
+    redirectCanonicalConsistent: false,
+    articleHtml: '',
+    pageHtml: '',
+    error: error || 'Fetch failed.'
   };
 }
 
+function sdsdGetResponseHeader_(res, name) {
+  const headers = res && res.getHeaders ? res.getHeaders() : {};
+  const target = String(name || '').toLowerCase();
+  const keys = Object.keys(headers || {});
+  for (let i = 0; i < keys.length; i++) {
+    if (String(keys[i]).toLowerCase() === target) return String(headers[keys[i]] || '').trim();
+  }
+  return '';
+}
+
+function sdsdResolveRedirectUrl_(baseUrl, location) {
+  const loc = String(location || '').trim();
+  if (!loc) return '';
+  if (/^https?:\/\//i.test(loc)) return loc;
+
+  const base = String(baseUrl || '').trim();
+  const originMatch = base.match(/^(https?:\/\/[^\/]+)/i);
+  if (!originMatch) return '';
+  const origin = originMatch[1];
+
+  if (loc.indexOf('//') === 0) {
+    const scheme = (base.match(/^(https?):/i) || [,'https'])[1];
+    return scheme + ':' + loc;
+  }
+  if (loc.charAt(0) === '/') return origin + loc;
+
+  const withoutQuery = base.split('#')[0].split('?')[0];
+  const slash = withoutQuery.lastIndexOf('/');
+  const dir = slash >= origin.length ? withoutQuery.slice(0, slash + 1) : origin + '/';
+  const combined = dir + loc;
+
+  const m = combined.match(/^(https?:\/\/[^\/]+)(\/.*)?$/i);
+  if (!m) return combined;
+  const parts = String(m[2] || '/').split('/');
+  const stack = [];
+  parts.forEach(part => {
+    if (!part || part === '.') return;
+    if (part === '..') stack.pop();
+    else stack.push(part);
+  });
+  return m[1] + '/' + stack.join('/');
+}
 function sdsdFirstMatch_(text, re) {
   const m = String(text || '').match(re);
   return m ? String(m[1] || '').trim() : '';
@@ -5465,11 +5587,21 @@ function sdsdPrecisionArticleEvidence_(article) {
       article_url: url,
       canonical_url: url,
       canonical_url_source: 'DIAGNOSIS_ARTICLE_URL',
+      requested_url: String(fetched.requestedUrl || url),
+      initial_http_status: Number(fetched.initialHttpStatus || fetched.httpStatus || 0),
+      redirect_detected: Boolean(fetched.redirectDetected),
+      redirect_target_url: String(fetched.redirectTargetUrl || ''),
+      redirect_chain: Array.isArray(fetched.redirectChain) ? fetched.redirectChain : [],
+      final_url: String(fetched.finalUrl || url),
+      final_http_status: Number(fetched.finalHttpStatus || fetched.httpStatus || 0),
       observed_html_canonical_url: String(fetched.canonicalUrl || ''),
+      canonical_matches_final_url: Boolean(fetched.canonicalMatchesFinalUrl),
+      redirect_canonical_consistent: Boolean(fetched.redirectCanonicalConsistent),
       canonical_mismatch: Boolean(
         fetched.canonicalUrl &&
-        sdsdNormalizeUrl_(fetched.canonicalUrl) !== sdsdNormalizeUrl_(url)
+        sdsdNormalizeUrl_(fetched.canonicalUrl) !== sdsdNormalizeUrl_(fetched.finalUrl || url)
       ),
+      redirect_status: sdsdRedirectEvidenceStatus_(fetched),
       fetched_at: new Date().toISOString()
     },
     search_console: {
@@ -5479,6 +5611,34 @@ function sdsdPrecisionArticleEvidence_(article) {
     },
     article_html: fetched.articleHtml
   };
+}
+
+
+function sdsdRedirectEvidenceStatus_(fetched) {
+  const initial = Number(fetched && fetched.initialHttpStatus || 0);
+  const finalStatus = Number(fetched && fetched.finalHttpStatus || fetched && fetched.httpStatus || 0);
+  const redirected = Boolean(fetched && fetched.redirectDetected);
+  const chain = fetched && Array.isArray(fetched.redirectChain) ? fetched.redirectChain : [];
+  const canonical = String(fetched && fetched.canonicalUrl || '');
+  const canonicalMatches = Boolean(fetched && fetched.canonicalMatchesFinalUrl);
+
+  if (String(fetched && fetched.status || '') === 'FETCH_ERROR') return 'REDIRECT_ERROR';
+  if (redirected && (initial === 302 || initial === 303 || initial === 307)) {
+    return canonical && !canonicalMatches ? 'REDIRECT_CANONICAL_CONFLICT' : 'TEMPORARY_REDIRECT_WARNING';
+  }
+  if (redirected && chain.length > 1) {
+    return canonical && !canonicalMatches ? 'REDIRECT_CANONICAL_CONFLICT' : 'REDIRECT_CHAIN_WARNING';
+  }
+  if (redirected && (initial === 301 || initial === 308)) {
+    if (finalStatus >= 200 && finalStatus < 300 && canonicalMatches) return 'MERGE_REDIRECT_OK';
+    if (canonical && !canonicalMatches) return 'REDIRECT_CANONICAL_CONFLICT';
+    return 'REDIRECT_TARGET_REVIEW';
+  }
+  if (!redirected && finalStatus >= 200 && finalStatus < 300) {
+    if (canonical && !canonicalMatches) return 'CANONICAL_MISMATCH';
+    return 'NORMAL';
+  }
+  return 'REDIRECT_REVIEW';
 }
 
 function sdsdPrecisionReferralText_(siteResult, cases) {
