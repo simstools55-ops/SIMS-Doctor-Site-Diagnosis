@@ -1,12 +1,17 @@
-# v0.5.6
+# v0.6.0
 
-- Connects finalized Site Diagnosis treatment plans to the existing SBM Site Diagnosis intake flow.
-- Generates an SBM-compatible `SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1` from the final normalized treatment plan.
-- Keeps Writer/Merge referral creation inside SIMS-Blog-Manager rather than bypassing SBM.
-- Adapts NO_ACTION to SBM monitoring while preserving the original route as `source_route_to`.
-- Reconstructs Merge target/source only from explicit Doctor article-role evidence and stops when the direction is ambiguous.
-- Adds an explicit SBM handoff completion state and Home guidance.
-- Adds no new cross-product contract.
+- Separates Creator validation from ordinary site-wide precision diagnosis so `eventual_route = CREATOR` cases no longer enter the top-five precision cluster package.
+- Adds Creator pre-publish validation using Article Master and GSC query evidence, with GREEN / YELLOW / RED risk grading.
+- Builds keyword-cluster context, differentiating terms, role boundaries, do-not-target intents, and internal-link candidates for Creator cases.
+- Adds Doctor SERP referral `SIMS_DOCTOR_CREATOR_SERP_REFERRAL_V1` and result intake `SIMS_DOCTOR_CREATOR_SERP_RESULT_V1`.
+- Accepts Doctor decisions `CREATOR / WRITER / BLOCK / NEEDS_EVIDENCE`; `CREATOR` produces a structured `creator_plan` for the SBM handoff.
+- Adds about-30-day post-publication monitoring policy to Creator plans; insufficient data extends monitoring rather than immediately judging failure.
+- Prioritizes pending Creator validation before ordinary precision packages in the guided workflow.
+- Adds SBM-style guided dialogs showing purpose, completed work, next action, and direct action buttons.
+- Evidence import can continue directly into site diagnosis; Doctor result intake uses a dedicated paste dialog instead of requiring normal users to paste into a sheet and press ▶ again.
+- Prevents regeneration of an already exported site-wide precision package while waiting for Doctor results.
+- Adds an ASCII site identifier to site-wide Diagnosis / Precision ZIP filenames.
+- Preserves individual-article Doctor-to-SBM responsibility and existing site-wide treatment behavior.
 
 # v0.5.5
 

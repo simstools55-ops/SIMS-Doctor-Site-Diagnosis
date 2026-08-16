@@ -1,4 +1,4 @@
-# SIMS Doctor Site Diagnosis v0.5.6
+# SIMS Doctor Site Diagnosis v0.6.0
 
 SIMS Doctor Site Diagnosis は、Collectorで収集したEvidenceを読み込み、サイト全体の診断、個別精密診断、横断診断、Doctorへの引き渡しまでを案内する診断ワークスペースです。
 
@@ -9,10 +9,10 @@ SIMS Doctor Site Diagnosis は、Collectorで収集したEvidenceを読み込み
 1. スプレッドシートを開きます。
 2. メニュー `SIMS Doctor Site Diagnosis` を開きます。
 3. `▶ 次に進む（Diagnosisに任せる）` を実行します。
-4. Homeの「次に行うこと」「理由」「操作」を確認します。
-5. Apps Scriptの実行時間などで処理が分割された場合も、同じ `▶ 次に進む（Diagnosisに任せる）` を再度実行してください。
+4. 以後は、各ダイアログに表示される「何のための処理か」「完了したこと」「次にすること」と次操作ボタンに従います。
+5. Apps Scriptの実行時間などで中断した場合や、現在地が分からなくなった場合だけ `▶ 次に進む（Diagnosisに任せる）` を再度実行してください。
 
-Diagnosisが現在の状態を確認し、Evidence Packageの読込み、サイト診断、個別精密診断、横断診断、Doctor結果登録など、次に必要な処理を自動判定します。
+Evidence Package読込後はそのままサイト診断へ進め、Doctor Package生成後はDoctor結果取込へ案内します。Doctor回答は通常、専用ダイアログへ全文またはJSONを貼り付けて取り込みます。
 
 ## 結果を確認するとき
 
@@ -24,6 +24,18 @@ Diagnosisが現在の状態を確認し、Evidence Packageの読込み、サイ�
 - `サイト治療計画を見る`
 
 処理を進めるときは `▶ 次に進む（Diagnosisに任せる）`、結果を見るときは `確認する` を使うのが基本です。
+
+
+## Creatorルート（v0.6.0）
+
+Site Diagnosisは、新記事候補を「作らないための審査」ではなく、重大なカニバリを避けながら有望なロングテールへ挑戦するための機会として扱います。
+
+1. Doctor一次診断で `eventual_route = CREATOR` となった案件を、通常のPrecision診断案件から分離します。
+2. Article MasterとGSCクエリを使い、既存記事との近さ、キーワードクラスター、差別化語、内部リンク候補を確認します。
+3. 暫定判定は GREEN / YELLOW / RED。関連記事があるだけでは停止せず、明確な同一検索意図・重大なカニバリが疑われる場合をREDとします。
+4. 選択案件についてDoctorへSERP確認紹介状を作り、実SERP上の独立性を `CREATOR / WRITER / BLOCK / NEEDS_EVIDENCE` で確定します。
+5. `CREATOR` 確定時は、メインKW、検索意図、既存記事との役割分担、狙わない意図、内部リンク候補、新記事作成理由、約30日のモニター条件を `creator_plan` としてSBMへ引き渡します。
+6. 新記事公開後の実績判定はSBMで行い、データ不足ならMONITOR延長、カニバリが確認された場合はDoctor / Writer / Mergeへ戻します。
 
 ## Article Masterについて
 
@@ -51,15 +63,15 @@ Site Diagnosisは、1つのスプレッドシートで1サイトずつ診断す�
 
 から個別処理を実行できます。
 
-## v0.5.6の主な変更
+## v0.6.0の主な変更
 
-- 治療方針確定後の「▶ 次に進む」を、サイト治療計画の再表示ではなくSBM引き渡し工程へ接続
-- 最終治療計画から既存SBM v5.10.4互換の `SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1` を生成
-- Writer / Merge / 経過観察をSBMへ渡し、各専門製品への正式紹介状生成はSBMに委譲
-- NO_ACTIONはSBM引き渡し時のみMONITORとして経過観察へ接続し、Doctorの元判断は `source_route_to` に保持
-- Merge案件はDoctorが付与した記事roleを使って統合先／吸収記事を安全に復元し、曖昧なら引き渡しを停止
-- SBM登録完了をDiagnosisへ記録し、Homeを「SBM引き渡し完了」へ更新
-- 新しい独自Contractは追加せず、既存のSite Diagnosis一括結果契約を再利用
+- Creator候補を通常の追加Evidence / Precision診断から分離
+- Creator候補チェック（GREEN / YELLOW / RED）とGSCクエリクラスター・役割分担・内部リンク候補を追加
+- 選択Creator案件のDoctor SERP確認紹介状と `SIMS_DOCTOR_CREATOR_SERP_RESULT_V1` 取込を追加
+- CREATOR確定時に `creator_plan` をDiagnosis→SBM handoffへ追加
+- Evidence読込、Doctor Package生成、Doctor結果取込をSBM型の「目的・完了・次操作」ダイアログへ改善
+- 横断Diagnosis / Precision ZIP名にASCIIのサイト識別子を追加
+- Precision Package生成済み時の重複生成を避け、Doctor回答取込へ誘導
 
 ## v0.5.5の主な変更
 
@@ -84,4 +96,4 @@ Site Diagnosisは、1つのスプレッドシートで1サイトずつ診断す�
 
 既存のApps Script環境では、今回コード変更があるのは `Code.gs` です。
 
-配布物の `VERSION`、`README-FIRST.md`、`CHANGELOG.md` もv0.5.4へ更新されています。`appsscript.json` と `SITE-WIDE-RESULT-CONTRACT-V1.md` は内容変更なしです。
+配布物の `VERSION`、`README-FIRST.md`、`CHANGELOG.md` もv0.6.0へ更新されています。`appsscript.json` と `SITE-WIDE-RESULT-CONTRACT-V1.md` は内容変更なしです。

@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.5.11';
+const SDSD_VERSION = '0.6.0';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -18,7 +18,9 @@ const SDSD_CONFIG = Object.freeze({
     opportunityCases: 'サイト横断診断案件',
     siteWideResult: '_SDSD_SITE_WIDE_RESULT',
     treatmentPlan: 'サイト治療計画',
-    siteWideResultImport: 'Doctor結果取込'
+    siteWideResultImport: 'Doctor結果取込',
+    creatorValidation: 'Creator候補チェック',
+    creatorSerpReferral: 'Creator SERP確認'
   },
   score: {
     demandMax: 30,
@@ -39,7 +41,8 @@ function onOpen() {
     .addItem('サイト診断詳細を見る', 'sdsdOpenSiteSummary')
     .addItem('診断候補を見る', 'sdsdOpenCandidates')
     .addItem('個別精密診断対象を見る', 'sdsdOpenSelectedCases')
-    .addItem('サイト治療計画を見る', 'sdsdOpenTreatmentPlan');
+    .addItem('サイト治療計画を見る', 'sdsdOpenTreatmentPlan')
+    .addItem('Creator候補チェックを見る', 'sdsdOpenCreatorValidation');
 
   const manualMenu = ui.createMenu('保守・復旧操作')
     .addItem('Evidence Packageを読み込む', 'sdsdImportEvidencePackageZip')
@@ -52,6 +55,9 @@ function onOpen() {
     .addSeparator()
     .addItem('個別記事：精密診断Packageを生成・再開', 'sdsdProceedIndividualPrecisionDiagnosis')
     .addItem('横断診断：追加Evidence Packageを生成', 'sdsdExportPriorityPrecisionClusterPackage')
+    .addItem('Creator候補：作成前チェックを実行', 'sdsdRunCreatorCandidateValidation')
+    .addItem('Creator候補：選択案件のSERP確認紹介状を作成', 'sdsdCreateCreatorSerpReferralFromSelected')
+    .addItem('Creator候補：Doctor SERP結果を登録', 'sdsdShowCreatorSerpResultDialog')
     .addItem('横断診断：選択中のMerge紹介状を作成', 'sdsdCreateMergeReferralFromSelectedTreatment')
     .addSeparator()
     .addItem('Article Master（任意）の案内', 'sdsdArticleMasterImportHelp')
@@ -195,7 +201,7 @@ function sdsdHomeGuide_(session,m,work,stored){
     return {
       title:'サイト横断の精密診断結果を待っています',
       reason:'追加Evidence精密診断Packageは生成済みです。Doctorから結果が返ったら「Doctor結果取込」へ貼り付けてください。',
-      path:'Doctor結果取込へ貼り付け → メニュー最上段 → ▶ 次に進む（Diagnosisに任せる）',
+      path:'▶ 次に進む → 「Doctor診断結果を貼り付ける」',
       tone:'YELLOW'
     };
   }
@@ -1406,14 +1412,14 @@ function sdsdClearSiteWidePrecisionPackageState_() {
 
 function sdsdShowSiteWidePrecisionResultWaiting_() {
   const state = sdsdGetSiteWidePrecisionPackageState_();
-  const fileLine = state.fileName ? `\n生成済みZIP: ${state.fileName}` : '';
-  SpreadsheetApp.getUi().alert(
-    'サイト横断の精密診断結果を待っています。\n\n' +
-    '精密診断Packageは生成済みです。再生成する必要はありません。' +
-    fileLine + '\n\n' +
-    'SIMS Doctorから結果が返ったら「Doctor結果取込」シートへ貼り付け、' +
-    '「▶ 次に進む（Diagnosisに任せる）」を実行してください。'
-  );
+  sdsdShowGuidedActionDialog_({
+    title:'Doctorの精密診断結果を待っています',
+    purpose:'追加Evidenceを使って、既存記事の役割分担・Merge・Writer等をDoctorに確定してもらう工程です。',
+    done:'精密診断Packageは生成済みです。再生成する必要はありません。',
+    next:'Doctorから回答が返ってきたら、下のボタンから回答全文を貼り付けてください。',
+    fileName:state.fileName||'', fileUrl:state.fileUrl||'',
+    primaryLabel:'Doctor診断結果を貼り付ける', primaryFn:'sdsdShowSiteWideDoctorResultDialog'
+  });
 }
 
 function sdsdMergePrecisionIntoStoredResult_(precisionNormalized) {
@@ -1590,7 +1596,8 @@ function sdsdBuildSbmSiteDiagnosisHandoff_() {
         ? c.treatment_plan.blocked_scope : [],
       internal_link_recommendations: Array.isArray(c.internal_link_recommendations)
         ? c.internal_link_recommendations : [],
-      presentation: c.presentation || null
+      presentation: c.presentation || null,
+      creator_plan: sourceRoute === 'CREATOR' ? (c.creator_plan || null) : null
     };
 
     if (sourceRoute === 'MERGE') {
@@ -1710,7 +1717,13 @@ function sdsdProceedNextGuided(){
     }
 
     if(stage==='WAITING_INPUT'){
-      sdsdRegisterSiteWideDoctorResult();
+      sdsdShowSiteWideDoctorResultDialog();
+      return;
+    }
+
+    const creatorSerpState=sdsdGetCreatorSerpState_();
+    if(creatorSerpState.status==='WAITING_DOCTOR_RESULT'){
+      sdsdShowCreatorSerpResultDialog();
       return;
     }
 
@@ -1736,6 +1749,22 @@ function sdsdProceedNextGuided(){
     }
 
     if(stored){
+      const creatorPending=sdsdCreatorValidationCases_().length;
+      if(creatorPending>0){
+        const creatorSheet=SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.creatorValidation);
+        if(!creatorSheet){
+          sdsdRunCreatorCandidateValidation();
+          return;
+        }
+        SpreadsheetApp.getActive().setActiveSheet(creatorSheet);
+        ui.alert(
+          '新記事候補の作成前チェックが必要です。\n\n' +
+          '目的：既存記事との重大なカニバリを避けつつ、独立したロングテール検索意図には積極的に挑戦します。\n\n' +
+          '次の操作：Creator候補チェックで1件を選び、\n' +
+          '「Creator候補：選択案件のSERP確認紹介状を作成」を実行してください。'
+        );
+        return;
+      }
       if(work.additionalEvidence>0){
         sdsdExportPriorityPrecisionClusterPackage();
         return;
@@ -2703,7 +2732,8 @@ function sdsdExportDoctorCasePackageZip(options) {
       ],
       file,
       created.folderInfo,
-      'このZIPをSIMS Doctorへ渡してください。'
+      'このZIPをSIMS Doctorへ渡してください。個別精密診断のDoctor回答はSIMS-Blog-Managerへ登録します。',
+      {purpose:'優先記事を個別に詳しく診断し、Writer等の処置方針を決めるPackageです。',primaryLabel:'次の手順を確認',primaryFn:'sdsdShowIndividualDoctorResultWaiting_'}
     );
   }
   return result;
@@ -2868,15 +2898,74 @@ function sdsdCreateZipInOutputFolder_(blobs, zipName) {
   return {file:file,folderInfo:info};
 }
 
-function sdsdShowZipExportComplete_(title, detailLines, file, folderInfo, nextText) {
+function sdsdSafeSiteToken_() {
+  const session = sdsdGetCurrentSession_();
+  let token = String(session.siteId || session.siteName || session.host || 'site').trim();
+  token = token.normalize ? token.normalize('NFKC') : token;
+  token = token.replace(/^https?:\/\//i,'').replace(/^www\./i,'').replace(/[^A-Za-z0-9._-]+/g,'-');
+  token = token.replace(/^-+|-+$/g,'').replace(/-+/g,'-');
+  return token || 'site';
+}
+
+function sdsdShowGuidedActionDialog_(o) {
+  o=o||{};
+  const esc=v=>String(v==null?'':v)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const title=esc(o.title||'次の操作');
+  const purpose=esc(o.purpose||'').replace(/\n/g,'<br>');
+  const done=esc(o.done||'').replace(/\n/g,'<br>');
+  const next=esc(o.next||'').replace(/\n/g,'<br>');
+  const primaryLabel=esc(o.primaryLabel||'次へ');
+  const primaryFn=String(o.primaryFn||'').replace(/[^A-Za-z0-9_]/g,'');
+  const secondaryLabel=esc(o.secondaryLabel||'閉じる');
+  const fileUrl=esc(o.fileUrl||'');
+  const fileName=esc(o.fileName||'');
+  const body=`<!doctype html><html><head><base target="_top"><style>
+  body{font-family:Arial,"Noto Sans JP",sans-serif;margin:0;background:#f8fafd;color:#202124}.wrap{padding:20px}
+  .hero{background:#185abc;color:#fff;padding:16px 18px;border-radius:10px}.hero h2{margin:0 0 5px;font-size:20px}.hero p{margin:0;line-height:1.6;font-size:13px}
+  .card{background:#fff;border:1px solid #dadce0;border-radius:10px;margin-top:14px;padding:14px}.label{font-weight:bold;color:#174ea6;margin-bottom:5px}.text{line-height:1.7;font-size:13px}
+  .file{margin-top:12px;padding:10px;background:#f1f3f4;border-radius:7px;word-break:break-all}.actions{text-align:right;margin-top:16px}
+  button,a.btn{display:inline-block;border:1px solid #dadce0;background:#fff;border-radius:6px;padding:9px 14px;cursor:pointer;text-decoration:none;color:#202124;margin-left:6px}
+  button.primary{background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:bold}.status{font-size:12px;color:#5f6368;margin-top:8px;text-align:right}
+  </style></head><body><div class="wrap"><div class="hero"><h2>${title}</h2><p>${purpose}</p></div>
+  ${done?`<div class="card"><div class="label">完了したこと</div><div class="text">${done}</div></div>`:''}
+  ${next?`<div class="card"><div class="label">次にすること</div><div class="text">${next}</div></div>`:''}
+  ${fileName?`<div class="file"><b>ファイル：</b>${fileName}${fileUrl?`<br><a href="${fileUrl}" target="_blank">Google Driveで開く</a>`:''}</div>`:''}
+  <div class="actions"><button onclick="google.script.host.close()">${secondaryLabel}</button>${primaryFn?`<button class="primary" id="primary">${primaryLabel}</button>`:''}</div><div id="status" class="status"></div>
+  </div><script>${primaryFn?`document.getElementById('primary').onclick=()=>{const b=document.getElementById('primary');b.disabled=true;document.getElementById('status').textContent='開いています...';google.script.run.withSuccessHandler(()=>google.script.host.close()).withFailureHandler(e=>{b.disabled=false;document.getElementById('status').textContent=(e&&e.message)?e.message:String(e||'エラー');}).${primaryFn}();};`:''}</script></body></html>`;
+  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(body).setWidth(620).setHeight(520), String(o.windowTitle||o.title||'次の操作'));
+}
+
+function sdsdShowSiteWideDoctorResultDialog() {
+  const html='<!doctype html><html><head><base target="_top"><style>'+ 
+    'body{font-family:Arial,"Noto Sans JP",sans-serif;margin:0;background:#f8fafd;color:#202124}.wrap{padding:20px}.hero{background:#185abc;color:#fff;padding:16px 18px;border-radius:10px}.hero h2{margin:0 0 6px;font-size:20px}.hero p{margin:0;font-size:13px;line-height:1.6}.card{background:#fff;border:1px solid #dadce0;border-radius:10px;margin-top:14px;padding:14px}textarea{width:100%;height:260px;box-sizing:border-box;border:1px solid #bdc1c6;border-radius:7px;padding:10px;font-family:monospace}.actions{text-align:right;margin-top:12px}button{border:1px solid #dadce0;background:#fff;border-radius:6px;padding:9px 14px;cursor:pointer;margin-left:6px}button.primary{background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:bold}.status{margin-top:8px;color:#5f6368;font-size:12px}'+
+    '</style></head><body><div class="wrap"><div class="hero"><h2>Doctor診断結果を取り込む</h2><p>Doctorの回答をDiagnosisへ戻し、治療計画またはCreator候補の次工程を決めます。</p></div><div class="card"><b>Doctor回答全文を貼り付けてください</b><p style="font-size:12px;color:#5f6368">横断診断・サイト横断精密診断のどちらでも、回答全文またはJSONをそのまま貼り付けられます。</p><textarea id="t" placeholder="Doctor回答全文またはJSONを貼り付け"></textarea><div class="status" id="s"></div></div><div class="actions"><button onclick="google.script.host.close()">キャンセル</button><button class="primary" id="go">診断結果を取り込む</button></div></div><script>document.getElementById("go").onclick=()=>{const t=document.getElementById("t").value.trim(),b=document.getElementById("go"),s=document.getElementById("s");if(!t){s.textContent="Doctor回答を貼り付けてください。";return;}b.disabled=true;s.textContent="取り込んでいます...";google.script.run.withSuccessHandler(()=>{s.textContent="取り込みを開始しました。";setTimeout(()=>google.script.host.close(),700);}).withFailureHandler(e=>{b.disabled=false;s.textContent=(e&&e.message)?e.message:String(e||"エラー");}).sdsdRegisterSiteWideDoctorResultText(t);};</script></body></html>';
+  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(html).setWidth(720).setHeight(590),'Doctor診断結果を取り込む');
+}
+
+function sdsdRegisterSiteWideDoctorResultText(text) {
+  const t=String(text||'').trim();
+  if(!t) throw new Error('Doctor回答が空です。');
+  const sh=sdsdEnsureSiteWideResultImportSheet_();
+  if(sh.getLastRow()>=2)sh.getRange(2,1,Math.max(sh.getLastRow()-1,1),1).clearContent();
+  sh.getRange('A2').setValue(t);
+  return sdsdRegisterSiteWideDoctorResult();
+}
+
+function sdsdShowZipExportComplete_(title, detailLines, file, folderInfo, nextText, options) {
   const lines=Array.isArray(detailLines)?detailLines:[];
-  SpreadsheetApp.getUi().alert(
-    String(title||'ZIP Packageを生成しました。')+'\n\n'+
-    (lines.length?lines.join('\n')+'\n\n':'')+
-    'ZIPファイル: '+file.getName()+'\n'+
-    '保存先: '+folderInfo.name+'\n\n'+
-    file.getUrl()+(nextText?'\n\n'+nextText:'')
-  );
+  const o=options||{};
+  sdsdShowGuidedActionDialog_({
+    title:String(title||'ZIP Packageを生成しました。'),
+    purpose:String(o.purpose||'Doctorへ渡す診断Packageの準備が完了しました。'),
+    done:(lines.length?lines.join('\n')+'\n':'')+'保存先: '+folderInfo.name,
+    next:String(nextText||'このZIPをSIMS Doctorへ渡してください。'),
+    fileName:file.getName(),
+    fileUrl:file.getUrl(),
+    primaryLabel:String(o.primaryLabel||'次の手順を確認'),
+    primaryFn:String(o.primaryFn||''),
+    secondaryLabel:'閉じる'
+  });
 }
 
 // ============================================================================
@@ -3490,7 +3579,7 @@ function sdsdImportEvidencePackageById_(fileId){
     siteName:packageMeta.siteName||sessionSite.siteId||sessionSite.host||'判定できません',
     siteUrl:packageMeta.siteUrl||sessionSite.url||'',
     rows:report[0].dataRows,queryUrlCount:diag.queryUrlCount,queryRows:diag.queryRows,
-    next:'次に「サイト全体を診断する → サイト診断を実行」へ進んでください。'
+    next:'次はサイト全体の分析です。通常はそのまま「サイト診断を開始」を押してください。'
   };
 }
 
@@ -3520,7 +3609,7 @@ function sdsdEvidencePickerHtml_(o){
   function choose(f,el){selected=f;document.querySelectorAll('.selected').forEach(x=>x.classList.remove('selected'));el.classList.add('selected');document.getElementById('import').disabled=true;
     document.getElementById('meta').textContent='内容を確認しています...';google.script.run.withSuccessHandler(m=>{document.getElementById('meta').innerHTML='<b>'+esc(m.fileName)+'</b><br>サイト名：'+esc(m.siteName||'不明')+'<br>サイトURL：'+esc(m.siteUrl||'不明')+'<br>作成日時：'+esc(m.generatedAt||'不明')+'<br>収集期間：'+esc(m.periodLabel||'不明');document.getElementById('import').disabled=false;}).withFailureHandler(fail).sdsdInspectEvidenceFile(f.id);}
   document.getElementById('up').onclick=()=>{if(current&&current.parent)load(current.parent.id)};
-  document.getElementById('import').onclick=()=>{if(!selected)return;const b=document.getElementById('import');b.disabled=true;b.textContent='読み込み中...';google.script.run.withSuccessHandler(r=>{document.getElementById('meta').innerHTML='<b style="color:#137333">読み込み完了</b><br>サイト：'+esc(r.siteName)+'<br>'+esc(r.next);setTimeout(()=>google.script.host.close(),1800);}).withFailureHandler(e=>{b.disabled=false;b.textContent='このEvidenceを読み込む';fail(e)}).sdsdImportSelectedEvidence({fileId:selected.id});};
+  document.getElementById('import').onclick=()=>{if(!selected)return;const b=document.getElementById('import');b.disabled=true;b.textContent='読み込み中...';google.script.run.withSuccessHandler(r=>{document.getElementById('meta').innerHTML='<b style="color:#137333">読み込み完了</b><br>サイト：'+esc(r.siteName)+'<br>'+esc(r.next);b.textContent='サイト診断を開始';b.disabled=false;b.onclick=()=>{b.disabled=true;b.textContent='分析中...';google.script.run.withSuccessHandler(()=>google.script.host.close()).withFailureHandler(e=>{b.disabled=false;b.textContent='サイト診断を開始';fail(e)}).sdsdRunProductDiagnosis();};}).withFailureHandler(e=>{b.disabled=false;b.textContent='このEvidenceを読み込む';fail(e)}).sdsdImportSelectedEvidence({fileId:selected.id});};
   load(init.folderId);
   </script></body></html>`;
 }
@@ -5298,7 +5387,7 @@ function sdsdExportSiteWideDoctorPackage() {
     });
 
     const zipName =
-      `SIMS-Doctor-Site-Wide-Diagnosis-${Utilities.formatDate(
+      `SIMS-Doctor-Site-Wide-Diagnosis-${sdsdSafeSiteToken_()}-${Utilities.formatDate(
         new Date(),
         Session.getScriptTimeZone() || 'Asia/Tokyo',
         'yyyyMMdd-HHmmss'
@@ -5312,7 +5401,8 @@ function sdsdExportSiteWideDoctorPackage() {
       [`案件数: ${rows.length}件`],
       file,
       created.folderInfo,
-      'このZIPをSIMS Doctorへ渡してください。'
+      'このZIPをSIMS Doctorへ渡してください。Doctorの回答が返ったら「Doctor診断結果を取り込む」へ進みます。',
+      {purpose:'サイト横断で見つかったカニバリ疑い・新記事機会・コンテンツギャップをDoctorに整理してもらうPackageです。',primaryLabel:'Doctor診断結果を取り込む',primaryFn:'sdsdShowSiteWideDoctorResultDialog'}
     );
 
     return {
@@ -5704,7 +5794,7 @@ function sdsdCreateMergeReferralFromSelectedTreatment() {
 function sdsdReadStoredSiteWideResult_() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.siteWideResult);
   if (!sh || !sh.getRange('A1').getValue()) {
-    throw new Error('Doctor診断結果が登録されていません。「Doctor結果取込」へ結果を貼り付け、「▶ 次に進む（Diagnosisに任せる）」を実行してください。');
+    throw new Error('Doctor診断結果が登録されていません。▶ 次に進むから「Doctor診断結果を貼り付ける」を開いてください。');
   }
   const raw = String(sh.getRange('A1').getValue() || '');
   const obj = JSON.parse(raw);
@@ -5721,12 +5811,630 @@ function sdsdNeedsEvidenceCases_() {
   );
 }
 
+function sdsdEvidencePurpose_(c) {
+  c = c || {};
+  const eventual = String(c.eventual_route || '').toUpperCase();
+  const decision = String(c.doctor_decision || '').toUpperCase();
+  const type = String(c.diagnosis_type || '').toUpperCase();
+
+  if (eventual === 'CREATOR' ||
+      decision.indexOf('CREATOR_PENDING') >= 0 ||
+      type.indexOf('NEW_ARTICLE') >= 0) {
+    return 'CREATOR_VALIDATION';
+  }
+  return 'PRECISION_DIAGNOSIS';
+}
+
 function sdsdNeedsEvidenceCaseCount_() {
   return sdsdNeedsEvidenceCases_().length;
 }
 
+function sdsdCreatorValidationCases_() {
+  return sdsdNeedsEvidenceCases_().filter(c =>
+    sdsdEvidencePurpose_(c) === 'CREATOR_VALIDATION'
+  );
+}
+
+function sdsdCreatorValidationCaseCount_() {
+  return sdsdCreatorValidationCases_().length;
+}
+
 function sdsdPrecisionClusterCases_() {
-  return sdsdNeedsEvidenceCases_().slice(0, 5);
+  return sdsdNeedsEvidenceCases_()
+    .filter(c => sdsdEvidencePurpose_(c) === 'PRECISION_DIAGNOSIS')
+    .slice(0, 5);
+}
+
+function sdsdCreatorCandidateQuery_(c) {
+  const theme = String(c && c.diagnosis_theme || '').trim();
+  if (theme) return theme;
+
+  const sourceMap = sdsdSiteWideSourceCaseMap_();
+  const ids = (c && c.absorbed_source_case_ids) || [];
+  for (let i=0; i<ids.length; i++) {
+    const src = sourceMap[String(ids[i])] || null;
+    if (!src) continue;
+    const q = String(src.main_queries || src.diagnosis_theme || '').trim();
+    if (q) return q.split(/[\n,、]/)[0].trim();
+  }
+  return '';
+}
+
+function sdsdCreatorValidationContext_() {
+  const articleMap = sdsdBuildArticleMasterMap_();
+  const queryRows = sdsdReadObjects_(SDSD_CONFIG.sheets.evidencePageQuery).map(r => ({
+    url: sdsdNormalizeUrl_(sdsdObjectValue_(r, ['page','key','url','URL','記事URL'])),
+    query: String(sdsdObjectValue_(r, ['query','クエリ','検索クエリ']) || '').trim(),
+    clicks: Number(sdsdObjectValue_(r, ['clicks','クリック数']) || 0),
+    impressions: Number(sdsdObjectValue_(r, ['impressions','表示回数']) || 0),
+    position: Number(sdsdObjectValue_(r, ['position','掲載順位','平均掲載順位']) || 0)
+  })).filter(x => x.url && x.query);
+  return {articleMap: articleMap, queryRows: queryRows};
+}
+
+
+function sdsdCreatorQueryClusterProfile_(query, ctx) {
+  const rows = (ctx && ctx.queryRows) || [];
+  const members = [];
+  rows.forEach(r => {
+    const sim = sdsdQuerySimilarity_(r.query, query);
+    if (sim < 0.30) return;
+    members.push({
+      query: r.query,
+      article_url: r.url,
+      similarity: Math.round(sim * 100) / 100,
+      impressions: Number(r.impressions || 0),
+      clicks: Number(r.clicks || 0),
+      position: Number(r.position || 0)
+    });
+  });
+  members.sort((a,b) => b.similarity - a.similarity || b.impressions - a.impressions);
+
+  const totalImp = members.reduce((n,x) => n + Number(x.impressions || 0), 0);
+  const urls = {};
+  members.forEach(x => { if (x.article_url) urls[x.article_url] = true; });
+  const base = sdsdParentThemeKey_(query) || query;
+
+  return {
+    cluster_label: base,
+    cluster_queries: members.slice(0, 20),
+    cluster_impressions: totalImp,
+    cluster_article_count: Object.keys(urls).length
+  };
+}
+
+function sdsdCreatorRoleDesign_(query, closest, profile) {
+  const candidateTokens = sdsdQueryTokens_(query);
+  const existingText = (closest || []).map(x => `${x.article_title || ''} ${x.main_query || ''}`).join(' ');
+  const existingNorm = sdsdNormalizeQuery_(existingText);
+  const differentiating = candidateTokens.filter(t => existingNorm.indexOf(t) < 0);
+  const focus = differentiating.length ? differentiating.join(' / ') : query;
+  const avoid = (closest || []).slice(0,3).map(x => x.main_query || x.article_title).filter(Boolean);
+
+  return {
+    role_summary: `新記事は「${query}」を主目的とし、特に「${focus}」の検索意図へ答える。既存記事の一般論を広げすぎず、独立したロングテール入口として設計する。`,
+    do_not_target: avoid,
+    differentiating_terms: differentiating,
+    cluster_label: profile.cluster_label
+  };
+}
+
+function sdsdCreatorInternalLinkCandidates_(closest, profile, ctx) {
+  const out = [];
+  const seen = {};
+  function add(url, reason) {
+    url = sdsdNormalizeUrl_(url);
+    if (!url || seen[url]) return;
+    seen[url] = true;
+    const a = (ctx.articleMap || {})[url] || {};
+    out.push({
+      article_url: url,
+      article_id: String(a.articleId || ''),
+      article_title: String(a.title || ''),
+      reason: reason
+    });
+  }
+  (closest || []).forEach(x => add(x.article_url, '検索意図が近い既存記事'));
+  (profile.cluster_queries || []).forEach(x => add(x.article_url, `同一キーワードクラスター: ${x.query}`));
+  return out.slice(0, 8);
+}
+
+function sdsdCreatorCandidateValidation_(c, ctx) {
+  const query = sdsdCreatorCandidateQuery_(c);
+  const nq = sdsdNormalizeQuery_(query);
+  if (!nq) {
+    return {
+      diagnosis_case_id: String(c.diagnosis_case_id || ''),
+      diagnosis_theme: String(c.diagnosis_theme || ''),
+      candidate_query: '',
+      grade: 'YELLOW',
+      gate: 'PROCEED_WITH_30D_MONITOR',
+      reason: '候補キーワードを特定できないため、公開前に検索意図を手動確認してください。',
+      differentiating_terms: [],
+      closest_articles: [],
+      related_queries: [],
+      serp_check: 'RECOMMENDED'
+    };
+  }
+
+  const qTokens = sdsdQueryTokens_(query);
+  const articles = [];
+  Object.keys(ctx.articleMap || {}).forEach(url => {
+    const a = ctx.articleMap[url] || {};
+    const title = String(a.title || '');
+    const mainQuery = String(a.mainQuery || '');
+    const titleCoverage = sdsdTitleQueryCoverage_(title, query);
+    const mainQuerySimilarity = mainQuery ? sdsdQuerySimilarity_(mainQuery, query) : 0;
+    const titleSimilarity = title ? sdsdQuerySimilarity_(title, query) : 0;
+    const intentScore = Math.max(titleCoverage, mainQuerySimilarity, titleSimilarity);
+    if (intentScore >= 0.35) {
+      articles.push({
+        article_url: url,
+        article_id: String(a.articleId || ''),
+        article_title: title,
+        main_query: mainQuery,
+        intent_score: Math.round(intentScore * 100) / 100
+      });
+    }
+  });
+  articles.sort((a,b) => b.intent_score - a.intent_score);
+
+  const related = [];
+  (ctx.queryRows || []).forEach(r => {
+    const sim = sdsdQuerySimilarity_(r.query, query);
+    if (sim < 0.45) return;
+    related.push({
+      query: r.query,
+      article_url: r.url,
+      similarity: Math.round(sim * 100) / 100,
+      impressions: r.impressions,
+      clicks: r.clicks,
+      position: r.position
+    });
+  });
+  related.sort((a,b) =>
+    b.similarity - a.similarity || b.impressions - a.impressions
+  );
+
+  const closest = articles.slice(0, 5);
+  const best = closest.length ? closest[0].intent_score : 0;
+  const nearCount = articles.filter(x => x.intent_score >= 0.65).length;
+  const exactIntent = best >= 0.85;
+
+  let grade = 'GREEN';
+  let gate = 'PROCEED';
+  let reason = '既存記事に強い検索意図一致が見つからず、独立したロングテール記事として試す余地があります。';
+  if (exactIntent) {
+    grade = 'RED';
+    gate = 'BLOCK_CREATOR_REVIEW_EXISTING';
+    reason = '既存記事に検索意図が非常に近い記事があります。新記事作成より既存記事での対応を先に確認してください。';
+  } else if (best >= 0.55 || nearCount > 0) {
+    grade = 'YELLOW';
+    gate = 'PROCEED_WITH_30D_MONITOR';
+    reason = '関連する既存記事はありますが、明確な同一意図までは確認されません。役割を限定して作成し、公開後30日を重点監視してください。';
+  }
+
+  const baseText = closest.map(x => `${x.article_title} ${x.main_query}`).join(' ');
+  const nb = sdsdNormalizeQuery_(baseText);
+  const differentiating = qTokens.filter(t => nb.indexOf(t) < 0);
+  const clusterProfile = sdsdCreatorQueryClusterProfile_(query, ctx);
+  const roleDesign = sdsdCreatorRoleDesign_(query, closest, clusterProfile);
+  const internalLinks = sdsdCreatorInternalLinkCandidates_(closest, clusterProfile, ctx);
+
+  return {
+    diagnosis_case_id: String(c.diagnosis_case_id || ''),
+    diagnosis_theme: String(c.diagnosis_theme || ''),
+    candidate_query: query,
+    grade: grade,
+    gate: gate,
+    reason: reason,
+    differentiating_terms: roleDesign.differentiating_terms.length ? roleDesign.differentiating_terms : differentiating,
+    keyword_cluster: clusterProfile.cluster_label,
+    cluster_queries: clusterProfile.cluster_queries,
+    cluster_impressions: clusterProfile.cluster_impressions,
+    role_summary: roleDesign.role_summary,
+    do_not_target: roleDesign.do_not_target,
+    internal_link_candidates: internalLinks,
+    closest_articles: closest,
+    related_queries: related.slice(0, 12),
+    serp_check: grade === 'RED' ? 'REQUIRED_BEFORE_CREATOR' : 'RECOMMENDED',
+    monitor_days: grade === 'RED' ? 0 : 30
+  };
+}
+
+function sdsdCreatorCandidateValidations_() {
+  const ctx = sdsdCreatorValidationContext_();
+  return sdsdCreatorValidationCases_().map(c =>
+    sdsdCreatorCandidateValidation_(c, ctx)
+  );
+}
+
+function sdsdWriteCreatorValidationSheet_(results) {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(SDSD_CONFIG.sheets.creatorValidation);
+  if (!sh) sh = ss.insertSheet(SDSD_CONFIG.sheets.creatorValidation);
+  sh.clear();
+
+  const headers = [
+    '案件ID','新記事候補','メインキーワード','判定','Creator可否',
+    '判定理由','検索クラスター','差別化語','役割分担','狙わない検索意図','内部リンク候補','近い既存記事','関連GSCクエリ','SERP確認','公開後モニター'
+  ];
+  const rows = (results || []).map(x => [
+    x.diagnosis_case_id,
+    x.diagnosis_theme,
+    x.candidate_query,
+    x.grade,
+    x.gate,
+    x.reason,
+    x.keyword_cluster || '',
+    (x.differentiating_terms || []).join(' / '),
+    x.role_summary || '',
+    (x.do_not_target || []).join(' / '),
+    (x.internal_link_candidates || []).map(a => `${a.article_title || '（タイトル未取得）'} / ${a.article_url} / ${a.reason || ''}`).join('\n'),
+    (x.closest_articles || []).map(a =>
+      `${a.article_title || '（タイトル未取得）'} / ${a.article_url} / intent=${a.intent_score}`
+    ).join('\n'),
+    (x.related_queries || []).map(q =>
+      `${q.query} / ${q.article_url} / sim=${q.similarity} / imp=${q.impressions}`
+    ).join('\n'),
+    x.serp_check,
+    x.monitor_days ? `${x.monitor_days}日` : ''
+  ]);
+
+  sh.getRange(1,1,1,headers.length).setValues([headers]);
+  if (rows.length) sh.getRange(2,1,rows.length,headers.length).setValues(rows);
+  sh.setFrozenRows(1);
+  sh.getRange(1,1,1,headers.length).setFontWeight('bold');
+  sh.getRange(1,1,Math.max(rows.length+1,1),headers.length).setWrap(true);
+  [190,260,240,90,220,420,220,220,480,320,520,520,520,220,150].forEach((w,i) => sh.setColumnWidth(i+1,w));
+  ss.setActiveSheet(sh);
+  return rows.length;
+}
+
+function sdsdRunCreatorCandidateValidation() {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    const results = sdsdCreatorCandidateValidations_();
+    if (!results.length) {
+      ui.alert('現在、新記事作成前チェックの対象案件はありません。');
+      return [];
+    }
+    sdsdWriteCreatorValidationSheet_(results);
+    const g = results.filter(x => x.grade === 'GREEN').length;
+    const y = results.filter(x => x.grade === 'YELLOW').length;
+    const r = results.filter(x => x.grade === 'RED').length;
+    ui.alert(
+      'Creator候補の作成前チェックが完了しました。\n\n' +
+      `GREEN（作成推奨）: ${g}件\n` +
+      `YELLOW（作成可・30日重点監視）: ${y}件\n` +
+      `RED（既存記事を先に確認）: ${r}件\n\n` +
+      '「Creator候補チェック」シートで、既存記事との近さ・関連GSCクエリ・差別化語を確認してください。\n' +
+      'SERP比較は次段階で追加します。'
+    );
+    return results;
+  } catch (e) {
+    ui.alert('Creator候補の作成前チェックに失敗しました。\n\n' + String(e && e.message ? e.message : e));
+    throw e;
+  }
+}
+
+
+function sdsdSelectedCreatorValidation_() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getActiveSheet();
+  if (!sh || sh.getName() !== SDSD_CONFIG.sheets.creatorValidation) {
+    throw new Error('「Creator候補チェック」シートで対象行を選択してください。');
+  }
+  const row = sh.getActiveRange().getRow();
+  if (row < 2) throw new Error('見出しではなくCreator候補の行を選択してください。');
+  const caseId = String(sh.getRange(row,1).getValue() || '').trim();
+  if (!caseId) throw new Error('選択行の案件IDを取得できません。');
+  const c = sdsdCreatorValidationCases_().find(x => String(x.diagnosis_case_id || '') === caseId);
+  if (!c) throw new Error('選択したCreator候補を保存済みDoctor結果から確認できません。');
+  const ctx = sdsdCreatorValidationContext_();
+  return {caseData:c, validation:sdsdCreatorCandidateValidation_(c, ctx)};
+}
+
+function sdsdBuildCreatorSerpReferralObject_(selected) {
+  const v = selected.validation || {};
+  const siteResult = sdsdReadStoredSiteWideResult_();
+  return {
+    format: 'SIMS_DOCTOR_CREATOR_SERP_REFERRAL_V1',
+    contract_version: '1.0',
+    site_diagnosis_batch_id: String(siteResult.site_diagnosis_batch_id || ''),
+    site: siteResult.site || {},
+    diagnosis_case_id: String(v.diagnosis_case_id || ''),
+    candidate_keyword: String(v.candidate_query || ''),
+    diagnosis_theme: String(v.diagnosis_theme || ''),
+    local_gate: String(v.grade || ''),
+    local_reason: String(v.reason || ''),
+    keyword_cluster: String(v.keyword_cluster || ''),
+    cluster_queries: v.cluster_queries || [],
+    proposed_role: String(v.role_summary || ''),
+    do_not_target: v.do_not_target || [],
+    closest_existing_articles: v.closest_articles || [],
+    internal_link_candidates: v.internal_link_candidates || [],
+    monitor_days_after_publish: Number(v.monitor_days || 30),
+    doctor_task: {
+      purpose: '新記事作成前のSERP独立性と競合価値を確認する',
+      checks: [
+        '候補キーワードを実際に検索し、上位ページの主な検索意図を確認する',
+        '元の広いテーマ/近接キーワードとSERPの顔ぶれ・回答内容が分離しているか確認する',
+        '既存記事で十分に回答できる意図か、新記事として独立させる価値があるか判断する',
+        '新記事化する場合、既存記事と競合しない役割分担と狙わない意図を確定する',
+        '内部リンク候補が妥当か確認する'
+      ],
+      risk_policy: '明確な同一意図・重大カニバリだけをBLOCKする。ロングテールで独立性が見込める場合は多少の不確実性を許容し、30日モニター前提でCREATORを許可する。'
+    },
+    required_response_format: 'SIMS_DOCTOR_CREATOR_SERP_RESULT_V1'
+  };
+}
+
+function sdsdBuildCreatorSerpReferralMarkdown_(o) {
+  return [
+    '# SIMS Doctor Creator SERP確認紹介状',
+    '',
+    `案件ID: ${o.diagnosis_case_id}`,
+    `候補キーワード: ${o.candidate_keyword}`,
+    `キーワードクラスター: ${o.keyword_cluster}`,
+    `Diagnosis暫定判定: ${o.local_gate}`,
+    '',
+    '## 新記事の予定役割',
+    o.proposed_role || '未設定',
+    '',
+    '## 狙わない検索意図',
+    ...(o.do_not_target || []).map(x => `- ${x}`),
+    '',
+    '## 近い既存記事',
+    ...(o.closest_existing_articles || []).map(x => `- ${x.article_title || ''} | ${x.main_query || ''} | ${x.article_url || ''}`),
+    '',
+    '## 内部リンク候補',
+    ...(o.internal_link_candidates || []).map(x => `- ${x.article_title || ''} | ${x.article_url || ''} | ${x.reason || ''}`),
+    '',
+    '## Doctorへの依頼',
+    '候補キーワードの現在SERPを確認し、競合ページの検索意図・構成を比較してください。',
+    '明確な同一意図の既存記事がある場合だけ新記事を止め、独立したロングテール需要がある場合はCREATORを優先してください。',
+    '多少の不確実性は許容し、公開後30日をSBMで観察する前提です。',
+    '',
+    '## 返却JSON',
+    '```json',
+    JSON.stringify({
+      format:'SIMS_DOCTOR_CREATOR_SERP_RESULT_V1',
+      diagnosis_case_id:o.diagnosis_case_id,
+      candidate_keyword:o.candidate_keyword,
+      decision:'CREATOR|WRITER|BLOCK|NEEDS_EVIDENCE',
+      serp_independence:'HIGH|MEDIUM|LOW',
+      search_intent:'',
+      competitor_summary:'',
+      role_with_existing_articles:'',
+      do_not_target:[],
+      internal_link_recommendations:[],
+      new_article_reason:'',
+      monitor_days:30,
+      confidence:0
+    }, null, 2),
+    '```'
+  ].join('\n');
+}
+
+function sdsdWriteCreatorSerpReferralSheet_(o) {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(SDSD_CONFIG.sheets.creatorSerpReferral);
+  if (!sh) sh = ss.insertSheet(SDSD_CONFIG.sheets.creatorSerpReferral);
+  sh.clear();
+  const md = sdsdBuildCreatorSerpReferralMarkdown_(o);
+  const rows = [
+    ['Creator SERP確認紹介状',''],
+    ['案件ID',o.diagnosis_case_id],
+    ['候補キーワード',o.candidate_keyword],
+    ['キーワードクラスター',o.keyword_cluster],
+    ['Diagnosis暫定判定',o.local_gate],
+    ['Doctorへ渡す紹介状（Markdown）',md],
+    ['Doctorへ渡す紹介状（JSON）',JSON.stringify(o,null,2)]
+  ];
+  sh.getRange(1,1,rows.length,2).setValues(rows);
+  sh.getRange(1,1,rows.length,2).setWrap(true).setVerticalAlignment('top');
+  sh.getRange(1,1,1,2).setFontWeight('bold');
+  sh.setColumnWidth(1,260); sh.setColumnWidth(2,900);
+  ss.setActiveSheet(sh);
+}
+
+function sdsdCreateCreatorSerpReferralFromSelected() {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    const selected = sdsdSelectedCreatorValidation_();
+    const referral = sdsdBuildCreatorSerpReferralObject_(selected);
+    sdsdWriteCreatorSerpReferralSheet_(referral);
+    sdsdSetCreatorSerpState_('WAITING_DOCTOR_RESULT', referral.diagnosis_case_id);
+    ui.alert(
+      'Creator候補のSERP確認紹介状を作成しました。\n\n' +
+      `候補キーワード: ${referral.candidate_keyword}\n\n` +
+      '目的：実際の検索結果でライバルと検索意図を確認し、新記事として独立させる価値を最終確認します。\n' +
+      '次の操作：「Creator SERP確認」シートのMarkdownまたはJSONをSIMS Doctorへ渡してください。'
+    );
+    return referral;
+  } catch(e) {
+    ui.alert('Creator SERP確認紹介状を作成できませんでした。\n\n' + String(e && e.message ? e.message : e));
+    throw e;
+  }
+}
+
+
+function sdsdSetCreatorSerpState_(status, caseId) {
+  const props = PropertiesService.getDocumentProperties();
+  props.setProperty('SDSD_CREATOR_SERP_STATUS', String(status || ''));
+  props.setProperty('SDSD_CREATOR_SERP_CASE_ID', String(caseId || ''));
+  props.setProperty('SDSD_CREATOR_SERP_AT', new Date().toISOString());
+}
+
+function sdsdGetCreatorSerpState_() {
+  const props = PropertiesService.getDocumentProperties();
+  return {
+    status: String(props.getProperty('SDSD_CREATOR_SERP_STATUS') || ''),
+    caseId: String(props.getProperty('SDSD_CREATOR_SERP_CASE_ID') || '')
+  };
+}
+
+function sdsdClearCreatorSerpState_() {
+  const props = PropertiesService.getDocumentProperties();
+  ['SDSD_CREATOR_SERP_STATUS','SDSD_CREATOR_SERP_CASE_ID','SDSD_CREATOR_SERP_AT']
+    .forEach(k => props.deleteProperty(k));
+}
+
+function sdsdValidateCreatorSerpResult_(o) {
+  if (!o || o.format !== 'SIMS_DOCTOR_CREATOR_SERP_RESULT_V1') {
+    throw new Error('Doctor結果のformatがSIMS_DOCTOR_CREATOR_SERP_RESULT_V1ではありません。');
+  }
+  if (!String(o.diagnosis_case_id || '').trim()) {
+    throw new Error('Doctor結果にdiagnosis_case_idがありません。');
+  }
+  const decision = String(o.decision || '').toUpperCase();
+  if (!['CREATOR','WRITER','BLOCK','NEEDS_EVIDENCE'].includes(decision)) {
+    throw new Error('decisionはCREATOR / WRITER / BLOCK / NEEDS_EVIDENCEのいずれかで返してください。');
+  }
+  return true;
+}
+
+function sdsdCreatorValidationForCaseId_(caseId) {
+  const c = sdsdCreatorValidationCases_().find(x => String(x.diagnosis_case_id || '') === String(caseId || ''));
+  if (!c) return null;
+  return sdsdCreatorCandidateValidation_(c, sdsdCreatorValidationContext_());
+}
+
+function sdsdApplyCreatorSerpResult_(doctorResult) {
+  sdsdValidateCreatorSerpResult_(doctorResult);
+  const stored = sdsdReadStoredSiteWideResult_();
+  const cases = Array.isArray(stored.diagnosis_cases) ? stored.diagnosis_cases : [];
+  const idx = cases.findIndex(c => String(c.diagnosis_case_id || '') === String(doctorResult.diagnosis_case_id || ''));
+  if (idx < 0) throw new Error('Doctor結果の案件IDが保存済みサイト治療計画にありません。');
+
+  const c = Object.assign({}, cases[idx]);
+  if (sdsdEvidencePurpose_(c) !== 'CREATOR_VALIDATION' && String(c.eventual_route || '').toUpperCase() !== 'CREATOR') {
+    throw new Error('選択案件はCreator候補ではありません。');
+  }
+
+  const local = sdsdCreatorValidationForCaseId_(c.diagnosis_case_id) || {};
+  const decision = String(doctorResult.decision || '').toUpperCase();
+  const monitorDays = Math.max(14, Number(doctorResult.monitor_days || local.monitor_days || 30) || 30);
+  const closest = Array.isArray(local.closest_articles) ? local.closest_articles : [];
+  const doctorLinks = Array.isArray(doctorResult.internal_link_recommendations)
+    ? doctorResult.internal_link_recommendations : [];
+
+  c.confidence = String(doctorResult.confidence || c.confidence || '');
+  c.additional_evidence_needed = [];
+  c.internal_link_recommendations = doctorLinks.length ? doctorLinks : (local.internal_link_candidates || []);
+
+  if (decision === 'CREATOR') {
+    c.route_to = 'CREATOR';
+    c.eventual_route = 'CREATOR';
+    c.doctor_decision = 'CREATOR_APPROVED_AFTER_SERP_CHECK';
+    c.treatment_strategy = 'CREATE_NEW_ARTICLE_AND_MONITOR';
+    c.reason = String(doctorResult.new_article_reason || doctorResult.role_with_existing_articles || c.reason || '');
+    c.creator_plan = {
+      candidate_keyword: String(doctorResult.candidate_keyword || local.candidate_query || c.diagnosis_theme || ''),
+      keyword_cluster: String(local.keyword_cluster || ''),
+      cluster_queries: local.cluster_queries || [],
+      search_intent: String(doctorResult.search_intent || ''),
+      serp_independence: String(doctorResult.serp_independence || ''),
+      competitor_summary: String(doctorResult.competitor_summary || ''),
+      new_article_reason: String(doctorResult.new_article_reason || ''),
+      role_with_existing_articles: String(doctorResult.role_with_existing_articles || local.role_summary || ''),
+      do_not_target: Array.isArray(doctorResult.do_not_target) && doctorResult.do_not_target.length
+        ? doctorResult.do_not_target : (local.do_not_target || []),
+      internal_link_candidates: c.internal_link_recommendations,
+      closest_existing_articles: closest,
+      local_gate: String(local.grade || ''),
+      monitor_days: monitorDays,
+      post_publish_policy: '公開後はSBMで約30日を初回評価点としてモニター。データ不足ならMONITOR延長。重大なカニバリが確認された場合はDoctor/Writer/Mergeへ再診断。'
+    };
+  } else if (decision === 'WRITER') {
+    if (!closest.length || !String(closest[0].article_url || '')) {
+      c.route_to = 'NEEDS_EVIDENCE';
+      c.eventual_route = 'WRITER';
+      c.doctor_decision = 'WRITER_RECOMMENDED_BUT_TARGET_UNRESOLVED';
+      c.treatment_strategy = 'WAIT_FOR_EXISTING_ARTICLE_TARGET';
+      c.additional_evidence_needed = ['Writerで改善する既存記事URLの特定'];
+      c.reason = String(doctorResult.new_article_reason || doctorResult.role_with_existing_articles || '既存記事で検索意図を吸収できるため、新記事作成よりWriterを優先。ただし対象記事確定が必要。');
+    } else {
+      c.route_to = 'WRITER';
+      c.eventual_route = 'WRITER';
+      c.doctor_decision = 'WRITER_INSTEAD_OF_CREATOR';
+      c.treatment_strategy = 'EXPAND_EXISTING_ARTICLE';
+      c.target_articles = [closest[0]];
+      c.reason = String(doctorResult.new_article_reason || doctorResult.role_with_existing_articles || 'SERP上の検索意図が既存記事と近いため、既存記事改善を優先。');
+    }
+    c.creator_plan = null;
+  } else if (decision === 'BLOCK') {
+    c.route_to = 'NO_ACTION';
+    c.eventual_route = 'NO_ACTION';
+    c.doctor_decision = 'CREATOR_BLOCKED_BY_CANNIBALIZATION_RISK';
+    c.treatment_strategy = 'DO_NOT_CREATE_NEW_ARTICLE';
+    c.reason = String(doctorResult.new_article_reason || doctorResult.role_with_existing_articles || '既存記事との重大なカニバリリスクがあるため新記事作成を見送る。');
+    c.creator_plan = null;
+  } else {
+    c.route_to = 'NEEDS_EVIDENCE';
+    c.eventual_route = 'CREATOR';
+    c.doctor_decision = 'CREATOR_NEEDS_MORE_EVIDENCE';
+    c.treatment_strategy = 'WAIT_FOR_CREATOR_VALIDATION_EVIDENCE';
+    c.reason = String(doctorResult.new_article_reason || doctorResult.role_with_existing_articles || c.reason || 'Creator可否の追加確認が必要。');
+    c.additional_evidence_needed = Array.isArray(doctorResult.additional_evidence_needed)
+      ? doctorResult.additional_evidence_needed.map(String)
+      : ['SERP独立性または既存記事との役割分担に関する追加Evidence'];
+    c.creator_plan = null;
+  }
+
+  cases[idx] = c;
+  stored.diagnosis_cases = cases;
+  sdsdStoreSiteWideResult_(stored);
+  sdsdWriteTreatmentPlan_(stored);
+  sdsdClearCreatorSerpState_();
+  try { sdsdWriteCreatorValidationSheet_(sdsdCreatorCandidateValidations_()); } catch(e) {}
+  try { sdsdRenderHome_(); } catch(e) {}
+  return c;
+}
+
+function sdsdRegisterCreatorSerpResult(text) {
+  const parsed = sdsdExtractJsonObject_(String(text || ''));
+  const updated = sdsdApplyCreatorSerpResult_(parsed);
+  return {
+    diagnosis_case_id: updated.diagnosis_case_id,
+    diagnosis_theme: updated.diagnosis_theme,
+    route_to: updated.route_to,
+    decision: updated.doctor_decision,
+    creator_plan: updated.creator_plan || null
+  };
+}
+
+function sdsdShowCreatorSerpResultDialog() {
+  const state = sdsdGetCreatorSerpState_();
+  const caseLabel = state.caseId ? `対象案件: ${state.caseId}` : '対象案件: Creator SERP確認中の案件';
+  const html = '<!doctype html><html><head><base target="_top"><meta charset="UTF-8"><style>' +
+    'body{font-family:Arial,"Noto Sans JP",sans-serif;padding:18px;background:#f8f9fa;color:#202124}' +
+    'h2{margin:0 0 6px;font-size:18px}.flow{background:#e8f0fe;color:#174ea6;padding:9px 11px;border-radius:7px;font-weight:700;font-size:12px;margin-bottom:10px}' +
+    '.why{font-size:13px;line-height:1.7;background:#fff;padding:10px;border-radius:7px;margin-bottom:10px}.case{font-size:12px;color:#5f6368;margin-bottom:8px}' +
+    'textarea{box-sizing:border-box;width:100%;height:330px;padding:10px;font:12px/1.45 monospace;white-space:pre;border:1px solid #bdc1c6;border-radius:7px;background:#fff}' +
+    '.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}button{padding:9px 15px;border:0;border-radius:6px;font-weight:700;cursor:pointer}.primary{background:#1a73e8;color:#fff}.secondary{background:#e8eaed;color:#202124}.status{font-size:12px;margin-top:8px;color:#137333;white-space:pre-wrap}' +
+    '</style></head><body><h2>DoctorのCreator SERP診断結果を取り込む</h2>' +
+    '<div class="flow">Site Diagnosis → Doctor（SERP確認）→ Diagnosis → SBM → Creator</div>' +
+    '<div class="why"><b>何のため？</b><br>候補キーワードが既存記事と重大なカニバリを起こさず、新記事として試す価値があるかを確定します。CREATORなら、メインKW・検索意図・役割分担・内部リンク・30日モニター条件をSBMへ引き継ぎます。</div>' +
+    '<div class="case">' + caseLabel.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>' +
+    '<textarea id="t" placeholder="Doctor回答全文または SIMS_DOCTOR_CREATOR_SERP_RESULT_V1 JSON を貼り付けてください"></textarea>' +
+    '<div class="actions"><button class="secondary" onclick="google.script.host.close()">閉じる</button><button class="primary" onclick="send()">診断結果を取り込む</button></div><div id="s" class="status"></div>' +
+    '<script>function send(){const t=document.getElementById("t").value.trim(),s=document.getElementById("s");if(!t){s.textContent="Doctor回答を貼り付けてください。";return}s.textContent="取り込んでいます...";google.script.run.withSuccessHandler(r=>{s.textContent="登録しました。次の処置: "+r.route_to+"\\nダイアログを閉じた後、▶ 次に進むで続けられます。";setTimeout(()=>google.script.host.close(),1200)}).withFailureHandler(e=>{s.textContent="取り込めませんでした："+((e&&e.message)?e.message:String(e||"不明なエラー"))}).sdsdRegisterCreatorSerpResult(t)}</script></body></html>';
+  SpreadsheetApp.getUi().showModalDialog(
+    HtmlService.createHtmlOutput(html).setWidth(760).setHeight(610),
+    'Creator SERP診断結果の取込'
+  );
+}
+
+function sdsdOpenCreatorValidation() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName(SDSD_CONFIG.sheets.creatorValidation);
+  if (!sh) {
+    SpreadsheetApp.getUi().alert('Creator候補チェックはまだ作成されていません。\n「Creator候補：作成前チェックを実行」を実行してください。');
+    return;
+  }
+  ss.setActiveSheet(sh);
 }
 
 function sdsdEvidenceRowsForUrl_(sheetName, url) {
@@ -5961,7 +6669,7 @@ function sdsdExportPriorityPrecisionClusterPackage() {
     ));
 
     const zipName =
-      `SIMS-Doctor-Site-Wide-Precision-${Utilities.formatDate(
+      `SIMS-Doctor-Site-Wide-Precision-${sdsdSafeSiteToken_()}-${Utilities.formatDate(
         new Date(),
         Session.getScriptTimeZone() || 'Asia/Tokyo',
         'yyyyMMdd-HHmmss'
@@ -5983,7 +6691,8 @@ function sdsdExportPriorityPrecisionClusterPackage() {
       [`優先クラスタ: ${cases.length}件`],
       file,
       created.folderInfo,
-      'このZIPをSIMS Doctorへ渡してください。'
+      'このZIPをSIMS Doctorへ渡してください。Doctorの回答が返ったら「Doctor診断結果を取り込む」へ進みます。',
+      {purpose:'優先クラスタの本文・Search Console等を使い、既存記事の最終処置をDoctorに確定してもらうPackageです。',primaryLabel:'Doctor診断結果を取り込む',primaryFn:'sdsdShowSiteWideDoctorResultDialog'}
     );
 
     return {
@@ -6456,7 +7165,8 @@ function sdsdNormalizeDoctorSiteWideResult_(obj) {
       merge_survivor: String(c.merge_survivor || ''),
       merge_absorbed: String(c.merge_absorbed || ''),
       merge_direction: String(c.merge_direction || ''),
-      merge_content_to_absorb: String(c.merge_content_to_absorb || '')
+      merge_content_to_absorb: String(c.merge_content_to_absorb || ''),
+      creator_plan: c.creator_plan || null
     }))
   };
 }
@@ -6512,7 +7222,9 @@ function sdsdWriteTreatmentPlan_(obj) {
     i+1,
     c.diagnosis_theme,
     c.doctor_decision,
-    routeJa[c.route_to] || c.route_to,
+    c.route_to === 'NEEDS_EVIDENCE' && sdsdEvidencePurpose_(c) === 'CREATOR_VALIDATION'
+      ? '新記事作成前チェック'
+      : (routeJa[c.route_to] || c.route_to),
     (c.target_articles || []).map(a => {
       if (typeof a === 'string') return a;
       return [a.article_id,a.article_title,a.article_url]
@@ -6525,7 +7237,9 @@ function sdsdWriteTreatmentPlan_(obj) {
     c.confidence,
     c.reason,
     (c.additional_evidence_needed || []).join(' / '),
-    c.route_to === 'NEEDS_EVIDENCE' ? '追加確認待ち' : '処置振り分け済み'
+    c.route_to === 'NEEDS_EVIDENCE'
+      ? (sdsdEvidencePurpose_(c) === 'CREATOR_VALIDATION' ? '新記事候補確認待ち' : '精密診断待ち')
+      : (c.route_to === 'CREATOR' ? 'SBM引き渡し待ち' : '処置振り分け済み')
   ]);
 
   sh.getRange(1,1,1,headers.length).setValues([headers]);
@@ -6621,13 +7335,8 @@ function sdsdRegisterSiteWideDoctorResult() {
     const sourceText = sdsdReadSiteWideResultImportText_();
 
     if (!sourceText) {
-      sdsdSetSiteWideRegisterStage_('WAITING_INPUT', 'Doctor結果取込シートへ入力待ち');
-      ss.setActiveSheet(importSheet);
-      ui.alert(
-        'Doctor診断結果の取込準備ができました。\n\n' +
-        '「Doctor結果取込」シートのA2以下へ、Doctor回答全文またはJSONを貼り付けてください。\n\n' +
-        '貼り付け後、メニュー最上段の「▶ 次に進む（Diagnosisに任せる）」を実行してください。'
-      );
+      sdsdSetSiteWideRegisterStage_('WAITING_INPUT', 'Doctor診断結果の入力待ち');
+      sdsdShowSiteWideDoctorResultDialog();
       return;
     }
 
