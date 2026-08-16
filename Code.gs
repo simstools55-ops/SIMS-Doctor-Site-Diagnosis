@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.7.1';
+const SDSD_VERSION = '0.7.2';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -219,9 +219,24 @@ function sdsdHomeGuide_(session,m,work,stored){
     };
   }
 
-  // v0.6.1: Creator candidates take navigation priority over a legacy
-  // site-wide Precision package waiting state. The Precision state is preserved
-  // and can be resumed after Creator validation; it must not block Creator work.
+  // v0.7.2: Once Doctor has finalized any Writer / Merge / Creator treatment,
+  // hand it to SBM before continuing with still-unresolved Creator candidates.
+  // This lets one confirmed Creator case complete end-to-end without forcing the
+  // user to finish every remaining YELLOW candidate first.
+  if(stored && work.actionableTreatment>0){
+    const handoffState=sdsdGetSbmHandoffState_();
+    if(!sdsdIsSbmHandoffCurrent_()){
+      return {
+        title:`SBMへ引き渡す確定案件が${work.actionableTreatment}件あります`,
+        reason:'Doctorで処置方針が確定した案件を先にSBMへ渡します。未確定のCreator候補は引き渡し後に続けられます。',
+        path:'メニュー最上段 → ▶ 次に進む（Diagnosisに任せる）',
+        tone:'BLUE'
+      };
+    }
+  }
+
+  // Creator candidates take priority over a legacy site-wide Precision package
+  // only after there is no newly-finalized SBM handoff waiting.
   if(stored){
     const creatorPending=sdsdCreatorValidationCases_().length;
     if(creatorPending>0){
@@ -266,17 +281,17 @@ function sdsdHomeGuide_(session,m,work,stored){
     }
     if(work.actionableTreatment>0){
       const handoffState=sdsdGetSbmHandoffState_();
-      if(handoffState==='COMPLETE'){
+      if(sdsdIsSbmHandoffCurrent_()){
         return {
           title:'SBMへの診断結果引き渡しは完了しています',
-          reason:'Writer / Mergeへの紹介状作成とその後の経過観察はSIMS-Blog-Managerで続けます。',
+          reason:'Writer / Creator / Mergeへの紹介状作成とその後の経過観察はSIMS-Blog-Managerで続けます。',
           path:'SIMS-Blog-Manager → SIMS Doctor → 5．Site Diagnosisの処置を進める',
           tone:'GREEN'
         };
       }
       return {
         title:`SBMへ引き渡す治療案件が${work.actionableTreatment}件あります`,
-        reason:'Doctorの診断で治療方針が決まりました。DiagnosisからSBMへ診断結果を渡し、SBMがWriter / Mergeへ正式に振り分けます。',
+        reason:'Doctorの診断で治療方針が決まりました。DiagnosisからSBMへ診断結果を渡し、SBMがWriter / Creator / Mergeへ正式に振り分けます。',
         path:'メニュー最上段 → ▶ 次に進む（Diagnosisに任せる）',
         tone:'BLUE'
       };
@@ -1696,6 +1711,42 @@ function sdsdGetSbmHandoffState_() {
   );
 }
 
+function sdsdSbmHandoffFingerprint_() {
+  const obj = sdsdBuildSbmSiteDiagnosisHandoff_();
+  const stable = (obj.clusters || []).map(c => {
+    const cr = c.cluster_result || {};
+    const cp = cr.creator_plan || {};
+    const mp = cr.merge_plan || {};
+    return {
+      diagnosis_case_id:String(c.diagnosis_case_id || ''),
+      next_action:String(c.workflow_handoff && c.workflow_handoff.next_action || ''),
+      diagnosis_theme:String(c.diagnosis_theme || ''),
+      source_route_to:String(cr.source_route_to || ''),
+      creator_keyword:String(cp.candidate_keyword || ''),
+      creator_role:String(cp.role_with_existing_articles || ''),
+      creator_monitor_days:Number(cp.monitor_days || 0),
+      merge_direction:String(mp.redirect_direction || ''),
+      article_urls:(Array.isArray(cr.articles) ? cr.articles : []).map(a => String(a.article_url || '')).sort()
+    };
+  }).sort((a,b) => a.diagnosis_case_id.localeCompare(b.diagnosis_case_id));
+  const digest = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    JSON.stringify(stable),
+    Utilities.Charset.UTF_8
+  );
+  return digest.map(b => ('0' + ((b + 256) % 256).toString(16)).slice(-2)).join('');
+}
+
+function sdsdIsSbmHandoffCurrent_() {
+  const props = PropertiesService.getDocumentProperties();
+  if (sdsdGetSbmHandoffState_() !== 'COMPLETE') return false;
+  const saved = String(props.getProperty('SDSD_SBM_HANDOFF_FINGERPRINT') || '');
+  // Older versions did not persist a payload fingerprint. Force one fresh handoff
+  // so newly-created Creator cases in an existing diagnosis session are not skipped.
+  if (!saved) return false;
+  try { return saved === sdsdSbmHandoffFingerprint_(); } catch (e) { return false; }
+}
+
 function sdsdShowSbmHandoffDialog_() {
   const ui = SpreadsheetApp.getUi();
   const obj = sdsdBuildSbmSiteDiagnosisHandoff_();
@@ -1710,8 +1761,8 @@ function sdsdShowSbmHandoffDialog_() {
     'textarea{box-sizing:border-box;width:100%;height:350px;padding:10px;font:12px/1.45 monospace;white-space:pre;border:1px solid #bdc1c6;border-radius:7px;background:#fff}' +
     '.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}button{padding:9px 15px;border:0;border-radius:6px;font-weight:700;cursor:pointer}.primary{background:#1a73e8;color:#fff}.done{background:#137333;color:#fff}.secondary{background:#e8eaed;color:#202124}.ok{font-size:12px;color:#137333;margin-top:8px}' +
     '</style></head><body><h2>SBMへ診断結果を引き渡す</h2>' +
-    '<div class="flow">Site Diagnosis → Doctor → Diagnosis → SBM → Writer / Merge</div>' +
-    '<div class="note">下のJSONをコピーし、SIMS-Blog-Managerの「SIMS Doctor → 5．Site Diagnosisの処置を進める」→「① DiagnosisからのDoctor診断結果を登録」へ貼り付けてください。SBMがWriter / Merge / 経過観察へ振り分けます。</div>' +
+    '<div class="flow">Site Diagnosis → Doctor → Diagnosis → SBM → Writer / Creator / Merge</div>' +
+    '<div class="note">下のJSONをコピーし、SIMS-Blog-Managerの「SIMS Doctor → 5．Site Diagnosisの処置を進める」→「① DiagnosisからのDoctor診断結果を登録」へ貼り付けてください。SBMがWriter / Creator / Merge / 経過観察へ振り分けます。</div>' +
     '<textarea id="t" readonly></textarea><div class="actions"><button class="secondary" onclick="google.script.host.close()">閉じる</button><button class="primary" onclick="copyText()">SBM用JSONをコピー</button><button class="done" onclick="done()">SBMへの登録完了</button></div><div id="s" class="ok"></div>' +
     '<script>const raw="' + encoded + '";function dec(x){x=x.replace(/-/g,"+").replace(/_/g,"/");while(x.length%4)x+="=";return decodeURIComponent(escape(atob(x)))}const t=document.getElementById("t");t.value=dec(raw);function copyText(){t.select();t.setSelectionRange(0,999999);navigator.clipboard.writeText(t.value).then(()=>document.getElementById("s").textContent="コピーしました。SBMへ貼り付けてください。").catch(()=>{document.execCommand("copy");document.getElementById("s").textContent="コピーしました。SBMへ貼り付けてください。"})}function done(){const s=document.getElementById("s");s.textContent="登録完了を記録しています...";google.script.run.withSuccessHandler(()=>{s.textContent="SBMへの登録完了を記録しました。";setTimeout(()=>google.script.host.close(),500)}).withFailureHandler(err=>{const msg=(err&&err.message)?err.message:String(err||"不明なエラー");s.textContent="登録完了を記録できませんでした："+msg}).sdsdMarkSbmHandoffComplete()}</script></body></html>';
 
@@ -1727,6 +1778,8 @@ function sdsdMarkSbmHandoffComplete() {
 }
 
 function sdsdMarkSbmHandoffComplete_() {
+  const props = PropertiesService.getDocumentProperties();
+  props.setProperty('SDSD_SBM_HANDOFF_FINGERPRINT', sdsdSbmHandoffFingerprint_());
   sdsdSetSbmHandoffState_('COMPLETE');
   try { sdsdRenderHome_(); } catch (e) {}
   return true;
@@ -1766,8 +1819,18 @@ function sdsdProceedNextGuided(){
       return;
     }
 
-    // v0.6.1 migration/navigation: Creator validation has priority over an
-    // already-generated legacy Precision package. Preserve that package state.
+    // v0.7.2: A finalized treatment must be handed to SBM before continuing
+    // unresolved Creator validation. This allows a confirmed long-tail Creator
+    // case to complete end-to-end while other YELLOW candidates remain pending.
+    if(stored && work.actionableTreatment>0){
+      const handoffState=sdsdGetSbmHandoffState_();
+      if(!sdsdIsSbmHandoffCurrent_()){
+        sdsdShowSbmHandoffDialog_();
+        return;
+      }
+    }
+
+    // Continue unresolved Creator validation only after pending SBM handoff is cleared.
     if(stored){
       const creatorPending=sdsdCreatorValidationCases_().length;
       if(creatorPending>0){
@@ -1819,11 +1882,11 @@ function sdsdProceedNextGuided(){
       }
       if(work.actionableTreatment>0){
         const handoffState=sdsdGetSbmHandoffState_();
-        if(handoffState==='COMPLETE'){
+        if(sdsdIsSbmHandoffCurrent_()){
           sdsdRenderHome_();
           ui.alert(
             'SBMへの診断結果引き渡しは完了として記録されています。\n\n' +
-            'Writer / Mergeの処置と経過観察はSIMS-Blog-Managerで続けてください。'
+            'Writer / Creator / Mergeの処置と経過観察はSIMS-Blog-Managerで続けてください。'
           );
           return;
         }
@@ -3287,6 +3350,7 @@ const SDSD_SESSION_PROP_KEYS_ = Object.freeze([
   'SDSD_SITE_WIDE_PRECISION_PACKAGE_AT',
   'SDSD_SBM_HANDOFF_STATUS',
   'SDSD_SBM_HANDOFF_AT',
+  'SDSD_SBM_HANDOFF_FINGERPRINT',
   'SDSD_SITE_WIDE_REGISTER_STAGE',
   'SDSD_SITE_WIDE_REGISTER_DETAIL',
   'SDSD_SITE_WIDE_REGISTER_AT'
@@ -8189,6 +8253,10 @@ function sdsdPromoteSelectedLongtailCandidateToCreator() {
     }
   };
   stored.diagnosis_cases = (stored.diagnosis_cases || []).concat([c]);
+  // A newly-finalized Creator case creates new work for SBM even if an earlier
+  // Writer/Merge handoff in this diagnosis session had already been marked complete.
+  sdsdSetSbmHandoffState_('PENDING_NEW_ACTIONABLE');
+  PropertiesService.getDocumentProperties().deleteProperty('SDSD_SBM_HANDOFF_FINGERPRINT');
   sdsdStoreSiteWideResult_(stored);
   sdsdWriteTreatmentPlan_(stored);
   try { sdsdWriteCreatorValidationSheet_(sdsdCreatorCandidateValidations_()); } catch(e) {}

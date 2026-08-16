@@ -1,7 +1,8 @@
 # Changelog
 
-## v0.7.1
-- Fixed long-tail Creator promotion not completing the parent Creator-validation case.
-- Added migration-safe resolution detection from existing derived Creator cases.
-- Refreshes Creator candidate validation after promotion.
-- Keeps the original source case for auditability while excluding it from pending Creator validation.
+## v0.7.2
+- Prioritizes finalized SBM handoff before remaining Creator SERP-review candidates.
+- Adds SBM handoff payload fingerprinting so new actionable cases invalidate an older completion state.
+- Migrates older sessions safely: a legacy `COMPLETE` state without a fingerprint requires one fresh handoff.
+- After handoff completion, unresolved Creator candidates resume normally.
+- Updates handoff UI wording to include Creator alongside Writer / Merge / monitoring.
