@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.7.0';
+const SDSD_VERSION = '0.7.1';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -5852,11 +5852,34 @@ function sdsdReadStoredSiteWideResult_() {
   return obj;
 }
 
+function sdsdResolvedCreatorValidationSourceIds_(obj) {
+  const resolved = {};
+  const cases = obj && Array.isArray(obj.diagnosis_cases) ? obj.diagnosis_cases : [];
+  cases.forEach(c => {
+    const route = String(c && c.route_to || '').toUpperCase();
+    const type = String(c && c.diagnosis_type || '').toUpperCase();
+    const decision = String(c && c.doctor_decision || '').toUpperCase();
+    const isResolvedCreator = route === 'CREATOR' && (
+      type === 'LONGTAIL_DISCOVERY_CREATOR' ||
+      decision === 'CREATOR_APPROVED_AFTER_LONGTAIL_DISCOVERY'
+    );
+    if (!isResolvedCreator) return;
+    (Array.isArray(c.absorbed_source_case_ids) ? c.absorbed_source_case_ids : [])
+      .map(String).filter(Boolean).forEach(id => { resolved[id] = true; });
+  });
+  return resolved;
+}
+
 function sdsdNeedsEvidenceCases_() {
   const obj = sdsdReadStoredSiteWideResult_();
-  return (obj.diagnosis_cases || []).filter(c =>
-    String(c.route_to || '') === 'NEEDS_EVIDENCE'
-  );
+  const resolvedCreatorSources = sdsdResolvedCreatorValidationSourceIds_(obj);
+  return (obj.diagnosis_cases || []).filter(c => {
+    if (String(c.route_to || '') !== 'NEEDS_EVIDENCE') return false;
+    const id = String(c.diagnosis_case_id || '');
+    if (id && resolvedCreatorSources[id]) return false;
+    if (String(c.creator_validation_status || '').toUpperCase() === 'RESOLVED_TO_LONGTAIL_CREATOR') return false;
+    return true;
+  });
 }
 
 function sdsdEvidencePurpose_(c) {
@@ -8128,6 +8151,13 @@ function sdsdPromoteSelectedLongtailCandidateToCreator() {
   const internalLinksText = String(values[10] || '');
   const internalLinks = internalLinksText.split('\n').map(line => line.trim()).filter(Boolean).map(line => ({note:line}));
   const targetArticles = Array.isArray(source.target_articles) ? source.target_articles : [];
+  // The parent NEEDS_EVIDENCE case is now resolved by this derived Creator case.
+  // Keep the original case for traceability, but exclude it from future Creator validation.
+  source.creator_validation_status = 'RESOLVED_TO_LONGTAIL_CREATOR';
+  source.creator_resolution_case_id = newCaseId;
+  source.creator_resolution_keyword = keyword;
+  source.creator_resolution_at = new Date().toISOString();
+
   const c = {
     diagnosis_case_id:newCaseId,
     diagnosis_theme:keyword,
@@ -8161,6 +8191,7 @@ function sdsdPromoteSelectedLongtailCandidateToCreator() {
   stored.diagnosis_cases = (stored.diagnosis_cases || []).concat([c]);
   sdsdStoreSiteWideResult_(stored);
   sdsdWriteTreatmentPlan_(stored);
+  try { sdsdWriteCreatorValidationSheet_(sdsdCreatorCandidateValidations_()); } catch(e) {}
   try { sdsdRenderHome_(); } catch(e) {}
   SpreadsheetApp.getUi().alert(`Creator案件として登録しました。\n\n候補キーワード: ${keyword}\n次はSite DiagnosisからSBMへ引き渡してください。`);
   return c;
