@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.5.9';
+const SDSD_VERSION = '0.5.10';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -2742,10 +2742,13 @@ function sdsdShowOutputFolder() {
 
 function sdsdChooseOutputFolder() {
   const current = sdsdOutputFolderInfo_();
-  const root = DriveApp.getRootFolder();
   const html = HtmlService.createHtmlOutput(sdsdOutputFolderPickerHtml_({
-    folderId:root.getId(),currentFolderId:current.id,currentFolderName:current.name
-  })).setWidth(720).setHeight(560);
+    folderId:current.id,
+    currentFolderId:current.id,
+    currentFolderName:current.name,
+    currentFolderUrl:current.url,
+    currentIsDefault:current.isDefault
+  })).setWidth(760).setHeight(640);
   SpreadsheetApp.getUi().showModalDialog(html, 'ZIP保存先を設定');
 }
 
@@ -2764,34 +2767,98 @@ function sdsdListOutputFolderPickerFolder(folderId) {
 function sdsdSetOutputFolder(payload) {
   const folderId=String(payload&&payload.folderId||'').trim();
   if(!folderId) throw new Error('保存先フォルダーが選択されていません。');
+
   const folder=DriveApp.getFolderById(folderId);
-  PropertiesService.getDocumentProperties().setProperty(SDSD_OUTPUT_FOLDER_PROP,folder.getId());
-  return {id:folder.getId(),name:folder.getName(),url:folder.getUrl()};
+  const savedId=folder.getId();
+  const props=PropertiesService.getDocumentProperties();
+  props.setProperty(SDSD_OUTPUT_FOLDER_PROP,savedId);
+
+  // Read back the saved value so the UI never reports success unless persistence succeeded.
+  const verifiedId=String(props.getProperty(SDSD_OUTPUT_FOLDER_PROP)||'').trim();
+  if(verifiedId!==savedId){
+    throw new Error('保存先設定の確認に失敗しました。もう一度設定してください。');
+  }
+
+  const verified=DriveApp.getFolderById(verifiedId);
+  return {
+    id:verified.getId(),
+    name:verified.getName()||'マイドライブ',
+    url:verified.getUrl(),
+    verified:true
+  };
 }
 
 function sdsdOutputFolderPickerHtml_(o) {
   const data=JSON.stringify(o||{}).replace(/</g,'\\u003c');
   return `<!doctype html><html><head><base target="_top"><style>
-  body{font-family:Arial,"Noto Sans JP",sans-serif;margin:0;background:#f8fafd;color:#202124}.wrap{padding:20px}
-  .hero{background:#185abc;color:#fff;padding:16px 18px;border-radius:10px}.hero h2{margin:0 0 5px;font-size:20px}.hero p{margin:0;font-size:13px}
-  .current{background:#e8f0fe;border:1px solid #aecbfa;border-radius:8px;padding:10px 12px;margin-top:12px;font-size:13px}
-  .card{background:#fff;border:1px solid #dadce0;border-radius:10px;margin-top:12px;padding:14px}.bar{display:flex;gap:8px;align-items:center}.where{flex:1;font-weight:bold;color:#174ea6}
-  button{border:1px solid #dadce0;background:#fff;border-radius:6px;padding:8px 12px;cursor:pointer}button.primary{background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:bold}
-  .list{height:260px;overflow:auto;border:1px solid #e0e0e0;border-radius:7px;margin-top:10px}.row{padding:10px 11px;border-bottom:1px solid #f1f3f4;cursor:pointer}.row:hover{background:#f8f9fa}
-  .hint{color:#5f6368;font-size:12px;margin-top:8px}.err{color:#b3261e;margin-top:8px}.actions{text-align:right;margin-top:14px}
-  </style></head><body><div class="wrap"><div class="hero"><h2>ZIP保存先を設定</h2><p>Evidence / Doctor Packageを保存するGoogle Driveフォルダーを選びます。</p></div>
-  <div class="current">現在の保存先：<b id="currentName"></b></div>
-  <div class="card"><div class="bar"><button id="up">↑ 上へ</button><div id="where" class="where"></div></div><div id="list" class="list"></div><div class="hint">📁 フォルダーをクリックして移動し、表示中のフォルダーを保存先に設定してください。</div></div>
-  <div id="err" class="err"></div><div class="actions"><button onclick="google.script.host.close()">キャンセル</button> <button id="set" class="primary">このフォルダーを保存先にする</button></div>
+  body{font-family:Arial,"Noto Sans JP",sans-serif;margin:0;background:#f8fafd;color:#202124}.wrap{padding:18px 20px 20px}
+  .hero{background:#185abc;color:#fff;padding:14px 18px;border-radius:10px}.hero h2{margin:0 0 5px;font-size:20px}.hero p{margin:0;font-size:13px}
+  .saved,.browse,.success{border-radius:8px;padding:10px 12px;margin-top:10px;font-size:13px}
+  .saved{background:#e8f0fe;border:1px solid #aecbfa}.browse{background:#fef7e0;border:1px solid #fdd663}
+  .success{display:none;background:#e6f4ea;border:1px solid #81c995;color:#137333;font-weight:bold}
+  .card{background:#fff;border:1px solid #dadce0;border-radius:10px;margin-top:10px;padding:12px}.bar{display:flex;gap:8px;align-items:center}.where{flex:1;font-weight:bold;color:#174ea6}
+  button{border:1px solid #dadce0;background:#fff;border-radius:6px;padding:8px 12px;cursor:pointer}button.primary{background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:bold}button:disabled{opacity:.55;cursor:default}
+  .list{height:245px;overflow:auto;border:1px solid #e0e0e0;border-radius:7px;margin-top:9px}.row{padding:9px 11px;border-bottom:1px solid #f1f3f4;cursor:pointer}.row:hover{background:#f8f9fa}
+  .hint{color:#5f6368;font-size:12px;margin-top:7px}.err{color:#b3261e;margin-top:8px;white-space:pre-wrap}.actions{text-align:right;margin-top:12px}
+  .url{font-size:11px;color:#5f6368;word-break:break-all;margin-top:3px}
+  </style></head><body><div class="wrap">
+  <div class="hero"><h2>ZIP保存先を設定</h2><p>Evidence / Doctor Packageを保存するGoogle Driveフォルダーを選びます。</p></div>
+  <div class="saved">現在設定済みの保存先：<b id="savedName"></b><div id="savedUrl" class="url"></div></div>
+  <div class="browse">いま表示中のフォルダー：<b id="browseName">読み込み中...</b></div>
+  <div id="success" class="success"></div>
+  <div class="card"><div class="bar"><button id="up">↑ 上へ</button><div id="where" class="where"></div></div><div id="list" class="list"></div><div class="hint">📁 フォルダーをクリックして移動し、「いま表示中のフォルダー」を保存先に設定してください。</div></div>
+  <div id="err" class="err"></div><div class="actions"><button id="close">閉じる</button> <button id="set" class="primary">このフォルダーを保存先にする</button></div>
   </div><script>
   const init=${data};let current=null;
-  const esc=s=>String(s||'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
-  document.getElementById('currentName').textContent=init.currentFolderName||'マイドライブ';
-  function fail(e){document.getElementById('err').textContent=(e&&e.message)||e;}
-  function load(id){document.getElementById('list').innerHTML='<div class="row">読み込み中...</div>';google.script.run.withSuccessHandler(render).withFailureHandler(fail).sdsdListOutputFolderPickerFolder(id);}
-  function render(d){current=d;document.getElementById('where').textContent=d.name||'マイドライブ';document.getElementById('up').disabled=!d.parent;const box=document.getElementById('list');box.innerHTML='';d.folders.forEach(f=>{const x=document.createElement('div');x.className='row';x.textContent='📁 '+f.name;x.onclick=()=>load(f.id);box.appendChild(x);});if(!d.folders.length)box.innerHTML='<div class="row" style="cursor:default;color:#5f6368">このフォルダー内にサブフォルダーはありません。</div>';}
+  document.getElementById('savedName').textContent=init.currentFolderName||'マイドライブ';
+  document.getElementById('savedUrl').textContent=init.currentFolderUrl||'';
+  document.getElementById('close').onclick=()=>google.script.host.close();
+
+  function fail(e){
+    document.getElementById('err').textContent=(e&&e.message)||String(e||'不明なエラー');
+    document.getElementById('success').style.display='none';
+  }
+  function load(id){
+    document.getElementById('err').textContent='';
+    document.getElementById('list').innerHTML='<div class="row" style="cursor:default">読み込み中...</div>';
+    google.script.run.withSuccessHandler(render).withFailureHandler(fail).sdsdListOutputFolderPickerFolder(id);
+  }
+  function render(d){
+    current=d;
+    document.getElementById('where').textContent=d.name||'マイドライブ';
+    document.getElementById('browseName').textContent=d.name||'マイドライブ';
+    document.getElementById('up').disabled=!d.parent;
+    const box=document.getElementById('list');box.innerHTML='';
+    d.folders.forEach(f=>{
+      const x=document.createElement('div');x.className='row';x.textContent='📁 '+f.name;
+      x.onclick=()=>load(f.id);box.appendChild(x);
+    });
+    if(!d.folders.length)box.innerHTML='<div class="row" style="cursor:default;color:#5f6368">このフォルダー内にサブフォルダーはありません。</div>';
+  }
   document.getElementById('up').onclick=()=>{if(current&&current.parent)load(current.parent.id);};
-  document.getElementById('set').onclick=()=>{if(!current)return;const b=document.getElementById('set');b.disabled=true;b.textContent='設定中...';google.script.run.withSuccessHandler(r=>{document.getElementById('currentName').textContent=r.name;b.textContent='設定完了';setTimeout(()=>google.script.host.close(),900);}).withFailureHandler(e=>{b.disabled=false;b.textContent='このフォルダーを保存先にする';fail(e);}).sdsdSetOutputFolder({folderId:current.id});};
+  document.getElementById('set').onclick=()=>{
+    if(!current){fail('フォルダー情報の読み込みが完了していません。');return;}
+    const b=document.getElementById('set');
+    b.disabled=true;b.textContent='設定中...';
+    document.getElementById('err').textContent='';
+    document.getElementById('success').style.display='none';
+    google.script.run
+      .withSuccessHandler(r=>{
+        if(!r||!r.verified){fail('保存先設定を確認できませんでした。');b.disabled=false;b.textContent='このフォルダーを保存先にする';return;}
+        document.getElementById('savedName').textContent=r.name;
+        document.getElementById('savedUrl').textContent=r.url||'';
+        const s=document.getElementById('success');
+        s.textContent='保存先を「'+r.name+'」に設定しました。';
+        s.style.display='block';
+        b.textContent='設定済み';
+        b.disabled=true;
+      })
+      .withFailureHandler(e=>{
+        b.disabled=false;b.textContent='このフォルダーを保存先にする';fail(e);
+      })
+      .sdsdSetOutputFolder({folderId:current.id});
+  };
+  // Start browsing from the folder that is actually configured, not from My Drive.
   load(init.folderId);
   </script></body></html>`;
 }
