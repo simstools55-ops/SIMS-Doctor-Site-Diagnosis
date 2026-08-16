@@ -1,14 +1,18 @@
 # CHANGELOG
 
+## v0.8.0
+
+- Reorganized Site Diagnosis around two user-facing flows:
+  - existing article diagnosis / treatment;
+  - new article opportunity / Creator.
+- Added whole-site route recommendation after the first analysis.
+- Added a single `Site Diagnosisを進める` modal workflow controller.
+- Added route selection and route switching.
+- Added persistent workflow route/status for interruption and resume.
+- Added current-step display and required input/output guidance.
+- Changed the main menu entry from generic `次に進む` to `1. Site Diagnosisを進める`.
+- Preserved existing underlying Doctor / SBM / Creator treatment logic.
+
 ## v0.7.4
 
-- Added visible completion state to the Site Treatment Plan after SBM handoff.
-- Completed non-NEEDS_EVIDENCE rows are grayed out and labeled as handed off to SBM.
-- NEEDS_EVIDENCE rows remain active so unfinished diagnosis work stays visible.
-- Treatment Plan refreshes immediately when the user records SBM registration completion.
-- Completion styling is fingerprint-aware and is removed automatically when the current handoff payload changes.
-
-## v0.7.3
-
-- Separated Creator new-article target identity from existing reference articles.
-- Preserved reference-only identity semantics for the SBM bridge.
+- Added visible completion state after SBM handoff.

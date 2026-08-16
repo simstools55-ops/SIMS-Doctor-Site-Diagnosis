@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.7.4';
+const SDSD_VERSION = '0.8.0';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -88,7 +88,7 @@ function onOpen() {
 
   ui.createMenu('SIMS Doctor Site Diagnosis')
     .addItem('Homeを開く', 'sdsdOpenHome')
-    .addItem('▶ 次に進む（Diagnosisに任せる）', 'sdsdProceedNextGuided')
+    .addItem('1. Site Diagnosisを進める', 'sdsdProceedNextGuided')
     .addSeparator()
     .addSubMenu(checkMenu)
     .addSeparator()
@@ -1304,15 +1304,17 @@ function sdsdRunProductDiagnosis() {
     const result = sdsdRunAnalysis({silent:true});
     sdsdHideInternalSheets_();
 
-    SpreadsheetApp.getUi().alert(
-      `サイト診断が完了しました。\n\n` +
-      `対象記事: ${result.total}件\n` +
-      `Doctor精密診断の優先候補: ${result.priorityCandidates}件\n` +
-      `回復・成長中のため保護: ${result.protected}件\n` +
-      `SBMの日常改善対象: ${result.sbm}件\n\n` +
-      `「サイト診断詳細を見る」で原因と具体的な確認手順を確認してください。\n` +
-      `詳しい記事一覧は「4. 診断候補を見る」で確認できます。`
-    );
+    const rec=sdsdWorkflowRecommendation_();
+    sdsdSetWorkflowState_({
+      route:null,
+      status:'ANALYSIS_COMPLETE',
+      recommendation:rec.route,
+      recommendationReason:rec.reason
+    });
+
+    try { sdsdRenderHome_(); } catch(e) {}
+    sdsdShowWorkflowRecommendationDialog_();
+    return result;
   } catch (e) {
     SpreadsheetApp.getUi().alert(
       `サイト診断を完了できませんでした。\n\n${e.message || e}`
@@ -1804,142 +1806,460 @@ function sdsdMarkSbmHandoffComplete_() {
   return true;
 }
 
+
 function sdsdProceedNextGuided(){
-  const ui=SpreadsheetApp.getUi();
-  try{
-    sdsdProductEnsureSheets_();
-    const session=sdsdGetCurrentSession_();
-    const work=sdsdSessionWorkSummary_();
-    const metrics=sdsdHomeDiagnosisMetrics_();
-    const stored=sdsdHomeReadStoredSiteWideResult_();
-    const props=PropertiesService.getDocumentProperties();
-    const stage=String(props.getProperty('SDSD_SITE_WIDE_REGISTER_STAGE')||'');
+  sdsdOpenWorkflowController_();
+}
 
-    if(!session.active){
-      sdsdImportEvidencePackageZip();
-      return;
-    }
+function sdsdWorkflowProps_(){
+  return PropertiesService.getDocumentProperties();
+}
 
-    // A pasted Doctor result always takes precedence over generating another package.
-    const pendingDoctorResult=sdsdPendingDoctorResultImport_();
-    if(pendingDoctorResult){
-      sdsdRegisterSiteWideDoctorResult();
-      return;
-    }
+function sdsdGetWorkflowState_(){
+  const p=sdsdWorkflowProps_();
+  return {
+    route:String(p.getProperty('SDSD_WORKFLOW_ROUTE')||''),
+    status:String(p.getProperty('SDSD_WORKFLOW_STATUS')||''),
+    recommendation:String(p.getProperty('SDSD_WORKFLOW_RECOMMENDATION')||''),
+    recommendationReason:String(p.getProperty('SDSD_WORKFLOW_RECOMMENDATION_REASON')||''),
+    updatedAt:String(p.getProperty('SDSD_WORKFLOW_UPDATED_AT')||'')
+  };
+}
 
-    if(stage==='WAITING_INPUT'){
-      sdsdShowSiteWideDoctorResultDialog();
-      return;
-    }
+function sdsdSetWorkflowState_(patch){
+  const p=sdsdWorkflowProps_();
+  const map={
+    route:'SDSD_WORKFLOW_ROUTE',
+    status:'SDSD_WORKFLOW_STATUS',
+    recommendation:'SDSD_WORKFLOW_RECOMMENDATION',
+    recommendationReason:'SDSD_WORKFLOW_RECOMMENDATION_REASON',
+    updatedAt:'SDSD_WORKFLOW_UPDATED_AT'
+  };
+  Object.keys(patch||{}).forEach(k=>{
+    if(!map[k])return;
+    const v=patch[k];
+    if(v===null||v===undefined||v==='')p.deleteProperty(map[k]);
+    else p.setProperty(map[k],String(v));
+  });
+  p.setProperty('SDSD_WORKFLOW_UPDATED_AT',new Date().toISOString());
+}
 
-    const creatorSerpState=sdsdGetCreatorSerpState_();
-    if(creatorSerpState.status==='WAITING_DOCTOR_RESULT'){
-      sdsdShowCreatorSerpResultDialog();
-      return;
-    }
+function sdsdClearWorkflowState_(){
+  const p=sdsdWorkflowProps_();
+  [
+    'SDSD_WORKFLOW_ROUTE',
+    'SDSD_WORKFLOW_STATUS',
+    'SDSD_WORKFLOW_RECOMMENDATION',
+    'SDSD_WORKFLOW_RECOMMENDATION_REASON',
+    'SDSD_WORKFLOW_UPDATED_AT'
+  ].forEach(k=>p.deleteProperty(k));
+}
 
-    // v0.7.2: A finalized treatment must be handed to SBM before continuing
-    // unresolved Creator validation. This allows a confirmed long-tail Creator
-    // case to complete end-to-end while other YELLOW candidates remain pending.
-    if(stored && work.actionableTreatment>0){
-      const handoffState=sdsdGetSbmHandoffState_();
-      if(!sdsdIsSbmHandoffCurrent_()){
-        sdsdShowSbmHandoffDialog_();
-        return;
-      }
-    }
+function sdsdWorkflowRecommendation_(){
+  const m=sdsdHomeDiagnosisMetrics_();
 
-    // Continue unresolved Creator validation only after pending SBM handoff is cleared.
+  const existingScore =
+    Number(m.a1||0)*6 +
+    Number(m.a2||0)*4 +
+    Number(m.severe||0)*4 +
+    Number(m.traffic||0)*2 +
+    Number(m.ranking||0)*2 +
+    Number(m.volatile||0);
+
+  const creatorScore =
+    Number(m.newArticle||0)*5 +
+    Number(m.gap||0)*3;
+
+  let route='EXISTING';
+  let reason='既存記事の悪化・優先診断候補を先に処置した方が、現在ある検索流入を守る効果が高いと判断しました。';
+
+  if(creatorScore>existingScore){
+    route='CREATOR';
+    reason='新規記事機会・コンテンツギャップが既存記事の緊急処置より強く、先に新しい検索需要を取りに行く価値が高いと判断しました。';
+  }else if(existingScore===0 && creatorScore>0){
+    route='CREATOR';
+    reason='緊急性の高い既存記事候補がなく、新規記事機会が確認されたためCreatorルートを優先します。';
+  }else if(existingScore===0 && creatorScore===0){
+    route='EXISTING';
+    reason='明確な新規記事機会がまだ確認されていないため、既存記事側の確認を先に行います。';
+  }
+
+  return {
+    route:route,
+    reason:reason,
+    metrics:m,
+    existingScore:existingScore,
+    creatorScore:creatorScore
+  };
+}
+
+function sdsdWorkflowRouteLabel_(route){
+  return String(route||'').toUpperCase()==='CREATOR'
+    ? '新記事を見つけてCreatorへ送る'
+    : '既存記事を診断・治療する';
+}
+
+function sdsdWorkflowStep_(route){
+  route=String(route||'').toUpperCase();
+  const session=sdsdGetCurrentSession_();
+  const metrics=sdsdHomeDiagnosisMetrics_();
+  const work=sdsdSessionWorkSummary_();
+  const stored=sdsdHomeReadStoredSiteWideResult_();
+  const props=PropertiesService.getDocumentProperties();
+  const stage=String(props.getProperty('SDSD_SITE_WIDE_REGISTER_STAGE')||'');
+
+  if(!session.active){
+    return {
+      code:'IMPORT_EVIDENCE',
+      title:'CollectorのEvidence Packageを読み込みます',
+      detail:'最初にCollectorから受け取ったZIPを選択します。',
+      button:'Evidence Packageを選ぶ'
+    };
+  }
+
+  if(!metrics.total){
+    return {
+      code:'RUN_ANALYSIS',
+      title:'サイト全体を分析します',
+      detail:'既存記事の状態と、新記事の検索機会を同時に分析して、どちらを先に進めるべきかDiagnosisが提案します。',
+      button:'サイト全体を分析する'
+    };
+  }
+
+  const pendingDoctorResult=sdsdPendingDoctorResultImport_();
+  if(pendingDoctorResult){
+    return {
+      code:'IMPORT_SITEWIDE_RESULT',
+      title:'Doctorの回答を登録します',
+      detail:'貼り付け済みのDoctor回答があります。内容を検証してDiagnosisへ登録します。',
+      button:'Doctor回答を登録する'
+    };
+  }
+
+  if(stage==='WAITING_INPUT'){
+    return {
+      code:'SHOW_SITEWIDE_INPUT',
+      title:'Doctorの回答待ちです',
+      detail:'生成済みPackageをDoctorへ渡し、返ってきた回答全文をこのダイアログから貼り付けます。',
+      button:'Doctor回答を貼り付ける'
+    };
+  }
+
+  const creatorSerpState=sdsdGetCreatorSerpState_();
+  if(creatorSerpState.status==='WAITING_DOCTOR_RESULT'){
+    return {
+      code:'SHOW_CREATOR_SERP_INPUT',
+      title:'Creator候補のSERP確認結果を待っています',
+      detail:'Doctorから返ったSERP確認結果を貼り付けて、新記事として進めてよいか確定します。',
+      button:'SERP確認結果を貼り付ける'
+    };
+  }
+
+  if(stored && work.actionableTreatment>0 && !sdsdIsSbmHandoffCurrent_()){
+    return {
+      code:'SBM_HANDOFF',
+      title:'確定した案件をSBMへ引き渡します',
+      detail:'Doctorで処置が確定した案件をSBMへ渡します。Writer・Merge・Creatorの実処置はSBM側で続けます。',
+      button:'SBM引き渡しを進める'
+    };
+  }
+
+  if(route==='CREATOR'){
     if(stored){
       const creatorPending=sdsdCreatorValidationCases_().length;
       if(creatorPending>0){
         const creatorSheet=SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.creatorValidation);
-        if(!creatorSheet){
-          sdsdRunCreatorCandidateValidation();
-          return;
-        }
-        SpreadsheetApp.getActive().setActiveSheet(creatorSheet);
-        sdsdShowGuidedActionDialog_({
-          title:'Creator候補を確認します',
-          purpose:'既存記事との重大なカニバリを避けながら、独立したロングテール検索意図には積極的に挑戦する工程です。',
-          done:'Creator候補チェックは作成済みです。旧Precision Packageの待機状態は保持しているため、後から精密診断へ戻れます。',
-          next:'Creator候補チェックを開き、対象候補の行を選んでSERP確認紹介状を作成してください。',
-          primaryLabel:'Creator候補チェックを見る',
-          primaryFn:'sdsdOpenCreatorValidation',
-          secondaryLabel:'閉じる',
-          windowTitle:'新記事候補の作成前チェック'
-        });
-        return;
+        return {
+          code:creatorSheet?'OPEN_CREATOR_VALIDATION':'RUN_CREATOR_VALIDATION',
+          title:'新記事候補の作成前チェックを行います',
+          detail:'既存記事との重大なカニバリを避けながら、独立した検索意図ならCreator候補として前進させます。',
+          button:creatorSheet?'Creator候補チェックを開く':'Creator候補チェックを作る'
+        };
+      }
+      if(work.additionalEvidence>0){
+        return {
+          code:'EXPORT_PRECISION',
+          title:'追加Evidenceで候補を詳しく確認します',
+          detail:'Doctorが追加確認を必要とした候補について、精密診断Packageを生成します。',
+          button:'追加Evidence Packageを作る'
+        };
       }
     }
 
     const precisionPackage=sdsdGetSiteWidePrecisionPackageState_();
     if(precisionPackage.status==='WAITING_DOCTOR_RESULT'){
-      sdsdShowSiteWidePrecisionResultWaiting_();
-      return;
-    }
-
-    // Individual Doctor Package already generated: do not regenerate it.
-    // Wait for Doctor result registration before selecting/building another batch.
-    const individualPackage=sdsdGetIndividualDoctorPackageState_();
-    if(individualPackage.status==='WAITING_DOCTOR_RESULT'){
-      sdsdShowIndividualDoctorResultWaiting_();
-      return;
-    }
-
-    // A1/A2 individual precision candidates take precedence while no package is waiting.
-    const individualEligible=sdsdEligibleIndividualPrecisionCount_();
-    if(individualEligible>0){
-      sdsdProceedIndividualPrecisionDiagnosis();
-      return;
-    }
-
-    if(stored){
-      if(work.additionalEvidence>0){
-        sdsdExportPriorityPrecisionClusterPackage();
-        return;
-      }
-      if(work.actionableTreatment>0){
-        const handoffState=sdsdGetSbmHandoffState_();
-        if(sdsdIsSbmHandoffCurrent_()){
-          sdsdRenderHome_();
-          ui.alert(
-            'SBMへの診断結果引き渡しは完了として記録されています。\n\n' +
-            'Writer / Creator / Mergeの処置と経過観察はSIMS-Blog-Managerで続けてください。'
-          );
-          return;
-        }
-        sdsdShowSbmHandoffDialog_();
-        return;
-      }
-      sdsdRenderHome_();
-      ui.alert('現在、Diagnosisで自動的に進める作業はありません。Homeを確認してください。');
-      return;
+      return {
+        code:'WAIT_PRECISION',
+        title:'Doctorの精密診断結果を待っています',
+        detail:'Packageは生成済みです。再生成せず、Doctorの回答が返ったら貼り付けます。',
+        button:'回答入力画面を開く'
+      };
     }
 
     if(work.opportunityCases>0){
-      sdsdExportSiteWideDoctorPackage();
-      return;
+      return {
+        code:'EXPORT_SITEWIDE',
+        title:'新記事機会をDoctorへ渡します',
+        detail:'サイト全体から見つかった新規記事機会・コンテンツギャップ等をDoctorが整理できるPackageを作ります。',
+        button:'Doctor Packageを作る'
+      };
     }
 
     if(metrics.crossTotal>0){
-      sdsdBuildSiteOpportunityCases();
+      return {
+        code:'BUILD_OPPORTUNITIES',
+        title:'新記事機会を案件化します',
+        detail:'サイト全体分析で見つかった検索機会を、Doctorへ渡せる案件に整理します。',
+        button:'新記事機会を整理する'
+      };
+    }
+
+    return {
+      code:'ROUTE_COMPLETE',
+      title:'Creator優先ルートは現在完了しています',
+      detail:'現在このルートで追加作業はありません。もう一方の「既存記事を診断・治療する」ルートへ切り替えられます。',
+      button:'既存記事ルートへ切り替える'
+    };
+  }
+
+  const precisionPackage=sdsdGetSiteWidePrecisionPackageState_();
+  if(precisionPackage.status==='WAITING_DOCTOR_RESULT'){
+    return {
+      code:'WAIT_PRECISION',
+      title:'Doctorの精密診断結果を待っています',
+      detail:'Packageは生成済みです。Doctorの回答が返ったら登録してください。',
+      button:'回答入力画面を開く'
+    };
+  }
+
+  const individualPackage=sdsdGetIndividualDoctorPackageState_();
+  if(individualPackage.status==='WAITING_DOCTOR_RESULT'){
+    return {
+      code:'WAIT_INDIVIDUAL',
+      title:'個別精密診断のDoctor結果待ちです',
+      detail:'個別記事のDoctor結果はSBMへ登録します。登録済みならDiagnosisに完了を記録します。',
+      button:'登録状況を確認する'
+    };
+  }
+
+  const individualEligible=sdsdEligibleIndividualPrecisionCount_();
+  if(individualEligible>0){
+    return {
+      code:'INDIVIDUAL_PRECISION',
+      title:`優先記事${individualEligible}件を詳しく診断します`,
+      detail:'既存記事の悪化・順位低下・高リスク候補を優先してDoctorへ渡します。',
+      button:'個別精密診断を進める'
+    };
+  }
+
+  if(stored && work.additionalEvidence>0){
+    return {
+      code:'EXPORT_PRECISION',
+      title:'追加Evidenceで既存記事を詳しく診断します',
+      detail:'現在の情報だけでは処置を確定できない案件について、本文等を追加したPackageを作ります。',
+      button:'追加Evidence Packageを作る'
+    };
+  }
+
+  return {
+    code:'ROUTE_COMPLETE',
+    title:'既存記事の優先ルートは現在完了しています',
+    detail:'現在このルートで追加作業はありません。もう一方の「新記事を見つけてCreatorへ送る」ルートへ切り替えられます。',
+    button:'Creatorルートへ切り替える'
+  };
+}
+
+function sdsdWorkflowEsc_(v){
+  return String(v==null?'':v)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function sdsdShowWorkflowRecommendationDialog_(){
+  const rec=sdsdWorkflowRecommendation_();
+  sdsdSetWorkflowState_({
+    status:'ROUTE_RECOMMENDED',
+    recommendation:rec.route,
+    recommendationReason:rec.reason
+  });
+
+  const m=rec.metrics;
+  const recommended=sdsdWorkflowRouteLabel_(rec.route);
+  const other=sdsdWorkflowRouteLabel_(rec.route==='CREATOR'?'EXISTING':'CREATOR');
+
+  const html=`<!doctype html><html><head><base target="_top"><style>
+    body{font-family:Arial,"Noto Sans JP",sans-serif;margin:0;background:#f8fafd;color:#202124}
+    .wrap{padding:20px}.hero{background:#185abc;color:#fff;border-radius:12px;padding:18px}
+    h2{margin:0 0 6px;font-size:21px}.sub{font-size:13px;line-height:1.6}
+    .card{background:#fff;border:1px solid #dadce0;border-radius:10px;padding:14px;margin-top:14px}
+    .rec{border:2px solid #1a73e8}.tag{display:inline-block;background:#e8f0fe;color:#174ea6;font-weight:bold;border-radius:999px;padding:4px 9px;font-size:12px}
+    .title{font-weight:bold;font-size:17px;margin-top:8px}.text{font-size:13px;line-height:1.7;margin-top:7px}
+    .metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.metric{background:#f1f3f4;border-radius:7px;padding:9px;font-size:12px}
+    .actions{text-align:right;margin-top:16px}button{border:1px solid #dadce0;border-radius:7px;background:#fff;padding:9px 13px;margin-left:6px;cursor:pointer}
+    .primary{background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:bold}.pause{float:left;color:#5f6368}
+  </style></head><body><div class="wrap">
+    <div class="hero"><h2>サイト全体の分析が完了しました</h2><div class="sub">Diagnosisが2つの大きな流れを比較し、先に進めるルートを提案します。</div></div>
+    <div class="card rec"><span class="tag">Diagnosisの推奨</span><div class="title">${sdsdWorkflowEsc_(recommended)}</div>
+      <div class="text">${sdsdWorkflowEsc_(rec.reason)}</div>
+      <div class="metrics">
+        <div class="metric">既存記事：A1 ${Number(m.a1||0)}件 / A2 ${Number(m.a2||0)}件 / 大幅悪化 ${Number(m.severe||0)}件</div>
+        <div class="metric">新記事：新規記事機会 ${Number(m.newArticle||0)}件 / コンテンツギャップ ${Number(m.gap||0)}件</div>
+      </div>
+    </div>
+    <div class="card"><div class="title">もう一方の流れ</div><div class="text">${sdsdWorkflowEsc_(other)}。推奨とは別にこちらを先に選ぶこともできます。</div></div>
+    <div class="actions">
+      <button class="pause" onclick="google.script.host.close()">中断して閉じる</button>
+      <button onclick="${rec.route==='CREATOR'?'chooseExisting()':'chooseCreator()'}">もう一方を先に進める</button>
+      <button class="primary" onclick="${rec.route==='CREATOR'?'chooseCreator()':'chooseExisting()'}">推奨ルートで進める</button>
+    </div>
+    <div id="status" style="font-size:12px;color:#5f6368;text-align:right;margin-top:8px"></div>
+  </div><script>
+    function chooseExisting(){
+      document.getElementById('status').textContent='保存しています...';
+      google.script.run.withSuccessHandler(()=>google.script.host.close())
+        .withFailureHandler(e=>document.getElementById('status').textContent=(e&&e.message)?e.message:String(e))
+        .sdsdSelectExistingWorkflow();
+    }
+    function chooseCreator(){
+      document.getElementById('status').textContent='保存しています...';
+      google.script.run.withSuccessHandler(()=>google.script.host.close())
+        .withFailureHandler(e=>document.getElementById('status').textContent=(e&&e.message)?e.message:String(e))
+        .sdsdSelectCreatorWorkflow();
+    }
+  </script></body></html>`;
+
+  SpreadsheetApp.getUi().showModalDialog(
+    HtmlService.createHtmlOutput(html).setWidth(690).setHeight(570),
+    'Site Diagnosisを進める'
+  );
+}
+
+function sdsdShowWorkflowProgressDialog_(){
+  const st=sdsdGetWorkflowState_();
+  const route=st.route||st.recommendation||'EXISTING';
+  const step=sdsdWorkflowStep_(route);
+  sdsdSetWorkflowState_({route:route,status:step.code});
+
+  const routeLabel=sdsdWorkflowRouteLabel_(route);
+  const resume=!!st.updatedAt;
+  const html=`<!doctype html><html><head><base target="_top"><style>
+    body{font-family:Arial,"Noto Sans JP",sans-serif;margin:0;background:#f8fafd;color:#202124}.wrap{padding:20px}
+    .hero{background:#185abc;color:#fff;border-radius:12px;padding:17px}.hero h2{margin:0 0 6px;font-size:20px}.hero p{margin:0;font-size:13px;line-height:1.6}
+    .route{background:#e8f0fe;color:#174ea6;border-radius:8px;padding:10px 12px;margin-top:13px;font-weight:bold}
+    .card{background:#fff;border:1px solid #dadce0;border-radius:10px;margin-top:13px;padding:14px}.label{font-size:12px;color:#5f6368;font-weight:bold}
+    .step{font-size:18px;font-weight:bold;margin-top:5px}.detail{font-size:13px;line-height:1.7;margin-top:7px}
+    .resume{font-size:12px;color:#137333;margin-top:9px}.actions{text-align:right;margin-top:16px}
+    button{border:1px solid #dadce0;background:#fff;border-radius:7px;padding:9px 13px;margin-left:6px;cursor:pointer}
+    .primary{background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:bold}.pause{float:left;color:#5f6368}
+  </style></head><body><div class="wrap">
+    <div class="hero"><h2>Site Diagnosisを進める</h2><p>必要な入出力をこの進行画面から順番に行います。途中で閉じても、次回は現在地から再開できます。</p></div>
+    <div class="route">現在の優先ルート：${sdsdWorkflowEsc_(routeLabel)}</div>
+    <div class="card">
+      <div class="label">現在の工程</div><div class="step">${sdsdWorkflowEsc_(step.title)}</div>
+      <div class="detail">${sdsdWorkflowEsc_(step.detail)}</div>
+      ${resume?'<div class="resume">前回の作業状態を保存済みです。この工程から再開します。</div>':''}
+    </div>
+    <div class="actions">
+      <button class="pause" onclick="google.script.host.close()">中断して閉じる</button>
+      <button onclick="switchRoute()">もう一方へ切り替える</button>
+      <button class="primary" onclick="advance()">${sdsdWorkflowEsc_(step.button)}</button>
+    </div>
+    <div id="status" style="font-size:12px;color:#5f6368;text-align:right;margin-top:8px"></div>
+  </div><script>
+    function advance(){
+      document.getElementById('status').textContent='処理しています...';
+      google.script.run.withSuccessHandler(()=>google.script.host.close())
+        .withFailureHandler(e=>document.getElementById('status').textContent=(e&&e.message)?e.message:String(e))
+        .sdsdWorkflowAdvance();
+    }
+    function switchRoute(){
+      document.getElementById('status').textContent='ルートを切り替えています...';
+      google.script.run.withSuccessHandler(()=>google.script.host.close())
+        .withFailureHandler(e=>document.getElementById('status').textContent=(e&&e.message)?e.message:String(e))
+        .sdsdSwitchWorkflowRoute();
+    }
+  </script></body></html>`;
+
+  SpreadsheetApp.getUi().showModalDialog(
+    HtmlService.createHtmlOutput(html).setWidth(690).setHeight(535),
+    'Site Diagnosisを進める'
+  );
+}
+
+function sdsdOpenWorkflowController_(){
+  const ui=SpreadsheetApp.getUi();
+  try{
+    sdsdProductEnsureSheets_();
+    const session=sdsdGetCurrentSession_();
+    if(!session.active){
+      sdsdImportEvidencePackageZip();
       return;
     }
 
-    if(metrics.total>0){
-      sdsdProceedIndividualPrecisionDiagnosis();
+    const metrics=sdsdHomeDiagnosisMetrics_();
+    if(!metrics.total){
+      sdsdRunProductDiagnosis();
       return;
     }
 
-    // Evidence is present but analysis has not yet produced candidates.
-    sdsdRunProductDiagnosis();
-    try{sdsdRenderHome_();}catch(e){}
+    const st=sdsdGetWorkflowState_();
+    if(!st.route){
+      sdsdShowWorkflowRecommendationDialog_();
+      return;
+    }
+    sdsdShowWorkflowProgressDialog_();
   }catch(e){
-    ui.alert(`次の処理へ進めませんでした。\n\n${e.message||e}`);
+    ui.alert(`Site Diagnosisを進められませんでした。\n\n${e.message||e}`);
     throw e;
   }
 }
+
+function sdsdSelectExistingWorkflow(){
+  sdsdSetWorkflowState_({route:'EXISTING',status:'ROUTE_SELECTED'});
+  sdsdShowWorkflowProgressDialog_();
+}
+
+function sdsdSelectCreatorWorkflow(){
+  sdsdSetWorkflowState_({route:'CREATOR',status:'ROUTE_SELECTED'});
+  sdsdShowWorkflowProgressDialog_();
+}
+
+function sdsdSwitchWorkflowRoute(){
+  const st=sdsdGetWorkflowState_();
+  const next=String(st.route||'EXISTING').toUpperCase()==='CREATOR'?'EXISTING':'CREATOR';
+  sdsdSetWorkflowState_({route:next,status:'ROUTE_SWITCHED'});
+  sdsdShowWorkflowProgressDialog_();
+}
+
+function sdsdWorkflowAdvance(){
+  const st=sdsdGetWorkflowState_();
+  const route=st.route||st.recommendation||'EXISTING';
+  const step=sdsdWorkflowStep_(route);
+  sdsdSetWorkflowState_({route:route,status:step.code});
+
+  switch(step.code){
+    case 'IMPORT_EVIDENCE': sdsdImportEvidencePackageZip(); return;
+    case 'RUN_ANALYSIS': sdsdRunProductDiagnosis(); return;
+    case 'IMPORT_SITEWIDE_RESULT': sdsdRegisterSiteWideDoctorResult(); return;
+    case 'SHOW_SITEWIDE_INPUT': sdsdShowSiteWideDoctorResultDialog(); return;
+    case 'SHOW_CREATOR_SERP_INPUT': sdsdShowCreatorSerpResultDialog(); return;
+    case 'SBM_HANDOFF': sdsdShowSbmHandoffDialog_(); return;
+    case 'RUN_CREATOR_VALIDATION':
+      sdsdRunCreatorCandidateValidation();
+      sdsdShowWorkflowProgressDialog_(); return;
+    case 'OPEN_CREATOR_VALIDATION': sdsdOpenCreatorValidation(); return;
+    case 'EXPORT_PRECISION': sdsdExportPriorityPrecisionClusterPackage(); return;
+    case 'WAIT_PRECISION': sdsdShowSiteWidePrecisionResultWaiting_(); return;
+    case 'EXPORT_SITEWIDE': sdsdExportSiteWideDoctorPackage(); return;
+    case 'BUILD_OPPORTUNITIES':
+      sdsdBuildSiteOpportunityCases();
+      sdsdShowWorkflowProgressDialog_(); return;
+    case 'WAIT_INDIVIDUAL': sdsdShowIndividualDoctorResultWaiting_(); return;
+    case 'INDIVIDUAL_PRECISION': sdsdProceedIndividualPrecisionDiagnosis(); return;
+    case 'ROUTE_COMPLETE': sdsdSwitchWorkflowRoute(); return;
+    default: sdsdShowWorkflowProgressDialog_(); return;
+  }
+}
+
 
 function sdsdCreateProductTreatmentBatch() {
   try {
