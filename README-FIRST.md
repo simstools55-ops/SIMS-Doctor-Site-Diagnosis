@@ -1,4 +1,4 @@
-# SIMS Doctor Site Diagnosis v0.6.2
+# SIMS Doctor Site Diagnosis v0.6.3
 
 SIMS Doctor Site Diagnosis は、Collectorで収集したEvidenceを読み込み、サイト全体の診断、個別精密診断、横断診断、Doctorへの引き渡しまでを案内する診断ワークスペースです。
 
@@ -26,13 +26,13 @@ Evidence Package読込後はそのままサイト診断へ進め、Doctor Packag
 処理を進めるときは `▶ 次に進む（Diagnosisに任せる）`、結果を見るときは `確認する` を使うのが基本です。
 
 
-## Creatorルート（v0.6.2）
+## Creatorルート（v0.6.3）
 
 Site Diagnosisは、新記事候補を「作らないための審査」ではなく、重大なカニバリを避けながら有望なロングテールへ挑戦するための機会として扱います。
 
 1. Doctor一次診断で `eventual_route = CREATOR` となった案件を、通常のPrecision診断案件から分離します。
 2. Article MasterとGSCクエリを使い、既存記事との近さ、キーワードクラスター、差別化語、内部リンク候補を確認します。
-3. 暫定判定は GREEN / YELLOW / RED。関連記事があるだけでは停止せず、明確な同一検索意図・重大なカニバリが疑われる場合をREDとします。
+3. 暫定判定は GREEN / YELLOW / RED。候補KWそのものを既存記事がGSCで取得していればRED、強い近似KWを取得していればYELLOW、既存担当記事が確認されない場合だけGREENとします。
 4. 選択案件についてDoctorへSERP確認紹介状を作り、実SERP上の独立性を `CREATOR / WRITER / BLOCK / NEEDS_EVIDENCE` で確定します。
 5. `CREATOR` 確定時は、メインKW、検索意図、既存記事との役割分担、狙わない意図、内部リンク候補、新記事作成理由、約30日のモニター条件を `creator_plan` としてSBMへ引き渡します。
 6. 新記事公開後の実績判定はSBMで行い、データ不足ならMONITOR延長、カニバリが確認された場合はDoctor / Writer / Mergeへ戻します。
@@ -62,6 +62,15 @@ Site Diagnosisは、1つのスプレッドシートで1サイトずつ診断す�
 `その他・管理 → 手動・保守操作`
 
 から個別処理を実行できます。
+
+## v0.6.3の主な変更
+
+- 候補KWと完全一致するGSCクエリを既存記事が取得している場合はREDとしてCreator候補から除外
+- similarity 0.85以上の強近似クエリはYELLOWとしてDoctor SERP確認へ
+- GREENを「既存担当記事が確認されない候補」に限定
+- 判定理由へ既存URL・クエリ・表示回数・類似度の実Evidenceを表示
+- Creator候補チェックはGREEN / YELLOWのみを通常表示
+- Homeの「新規記事機会」を再判定後のGREEN + YELLOW件数で表示
 
 ## v0.6.2の主な変更
 
@@ -96,7 +105,7 @@ Site Diagnosisは、1つのスプレッドシートで1サイトずつ診断す�
 
 既存のApps Script環境では、今回コード変更があるのは `Code.gs` です。
 
-配布物の `VERSION`、`README-FIRST.md`、`CHANGELOG.md` もv0.6.2へ更新されています。`appsscript.json` と `SITE-WIDE-RESULT-CONTRACT-V1.md` は内容変更なしです。
+配布物の `VERSION`、`README-FIRST.md`、`CHANGELOG.md` もv0.6.3へ更新されています。`appsscript.json` と `SITE-WIDE-RESULT-CONTRACT-V1.md` は内容変更なしです。
 
 ## v0.6.2 Creator SERP回答取込導線
 

@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.6.2';
+const SDSD_VERSION = '0.6.3';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -146,6 +146,18 @@ function sdsdHomeDiagnosisMetrics_(){
       else if(type.indexOf('新規記事')>=0)m.newArticle++;
       else if(type.indexOf('コンテンツギャップ')>=0)m.gap++;
     });
+  }catch(e){}
+
+  // Doctor結果取込後は、一次検出件数ではなくCreatorゲート再判定後の
+  // GREEN + YELLOWを「新規記事機会」として表示する。
+  try{
+    const stored=sdsdHomeReadStoredSiteWideResult_();
+    if(stored && Array.isArray(stored.diagnosis_cases)){
+      const validations=sdsdCreatorCandidateValidations_();
+      if(validations.length){
+        m.newArticle=validations.filter(x=>x.grade==='GREEN'||x.grade==='YELLOW').length;
+      }
+    }
   }catch(e){}
 
   return m;
@@ -6026,20 +6038,38 @@ function sdsdCreatorCandidateValidation_(c, ctx) {
 
   const closest = articles.slice(0, 5);
   const best = closest.length ? closest[0].intent_score : 0;
-  const nearCount = articles.filter(x => x.intent_score >= 0.65).length;
-  const exactIntent = best >= 0.85;
+
+  // v0.6.3: GSCで既存記事が候補KWをすでに担当している事実を、
+  // タイトル推定より強いEvidenceとしてCreatorゲートへ反映する。
+  const exactQueryRows = related.filter(x =>
+    sdsdNormalizeQuery_(x.query) === nq && !!x.article_url
+  );
+  const strongNearRows = related.filter(x =>
+    x.similarity >= 0.85 && !!x.article_url && sdsdNormalizeQuery_(x.query) !== nq
+  );
+  const exactUrls = Array.from(new Set(exactQueryRows.map(x => x.article_url)));
+  const strongNearUrls = Array.from(new Set(strongNearRows.map(x => x.article_url)));
 
   let grade = 'GREEN';
   let gate = 'PROCEED';
-  let reason = '既存記事に強い検索意図一致が見つからず、独立したロングテール記事として試す余地があります。';
-  if (exactIntent) {
+  let reason = '候補キーワードおよび主要な近似キーワードを担当する既存記事が確認されず、独立したロングテール記事として試す余地があります。';
+
+  if (exactQueryRows.length) {
     grade = 'RED';
     gate = 'BLOCK_CREATOR_REVIEW_EXISTING';
-    reason = '既存記事に検索意図が非常に近い記事があります。新記事作成より既存記事での対応を先に確認してください。';
-  } else if (best >= 0.55 || nearCount > 0) {
+    const top = exactQueryRows[0];
+    reason = `既存記事 ${top.article_url} が候補キーワード「${query}」で既に表示されています（表示回数 ${Number(top.impressions||0)}）。新記事は作らず、既存記事の強化・役割整理を先に確認してください。`;
+  } else if (strongNearRows.length || best >= 0.85) {
     grade = 'YELLOW';
-    gate = 'PROCEED_WITH_30D_MONITOR';
-    reason = '関連する既存記事はありますが、明確な同一意図までは確認されません。役割を限定して作成し、公開後30日を重点監視してください。';
+    gate = 'SERP_REVIEW_BEFORE_CREATOR';
+    const top = strongNearRows[0] || null;
+    reason = top
+      ? `候補キーワードと強く近い既存クエリ「${top.query}」を ${top.article_url} が取得しています（類似度 ${top.similarity}、表示回数 ${Number(top.impressions||0)}）。追加語による独立意図があるかDoctorのSERP確認を行ってください。`
+      : '既存記事に非常に近い検索意図が確認されます。独立ロングテールとして分離できるかDoctorのSERP確認を行ってください。';
+  } else if (best >= 0.55 || related.some(x => x.similarity >= 0.67)) {
+    grade = 'YELLOW';
+    gate = 'SERP_REVIEW_BEFORE_CREATOR';
+    reason = '関連する既存記事・近接クエリがあります。独立した検索意図として分離できる可能性は残るため、DoctorのSERP確認後にCreator可否を決めてください。';
   }
 
   const baseText = closest.map(x => `${x.article_title} ${x.main_query}`).join(' ');
@@ -6065,7 +6095,7 @@ function sdsdCreatorCandidateValidation_(c, ctx) {
     internal_link_candidates: internalLinks,
     closest_articles: closest,
     related_queries: related.slice(0, 12),
-    serp_check: grade === 'RED' ? 'REQUIRED_BEFORE_CREATOR' : 'RECOMMENDED',
+    serp_check: grade === 'GREEN' ? 'OPTIONAL' : (grade === 'YELLOW' ? 'REQUIRED_BEFORE_CREATOR' : 'NOT_APPLICABLE'),
     monitor_days: grade === 'RED' ? 0 : 30
   };
 }
@@ -6087,7 +6117,10 @@ function sdsdWriteCreatorValidationSheet_(results) {
     '案件ID','新記事候補','メインキーワード','判定','Creator可否',
     '判定理由','検索クラスター','差別化語','役割分担','狙わない検索意図','内部リンク候補','近い既存記事','関連GSCクエリ','SERP確認','公開後モニター'
   ];
-  const rows = (results || []).map(x => [
+  // Creator作業用の通常表示は、前進可能なGREEN/YELLOWに限定する。
+  // REDは集計・再判定には保持するが、Creator候補一覧へは表示しない。
+  const visibleResults = (results || []).filter(x => x.grade !== 'RED');
+  const rows = visibleResults.map(x => [
     x.diagnosis_case_id,
     x.diagnosis_theme,
     x.candidate_query,
@@ -6133,11 +6166,11 @@ function sdsdRunCreatorCandidateValidation() {
     const r = results.filter(x => x.grade === 'RED').length;
     ui.alert(
       'Creator候補の作成前チェックが完了しました。\n\n' +
-      `GREEN（作成推奨）: ${g}件\n` +
-      `YELLOW（作成可・30日重点監視）: ${y}件\n` +
-      `RED（既存記事を先に確認）: ${r}件\n\n` +
-      '「Creator候補チェック」シートで、既存記事との近さ・関連GSCクエリ・差別化語を確認してください。\n' +
-      'SERP比較は次段階で追加します。'
+      `GREEN（独立性高・作成候補）: ${g}件\n` +
+      `YELLOW（SERP確認後に判断）: ${y}件\n` +
+      `RED（既存担当記事あり・Creator除外）: ${r}件\n\n` +
+      '「Creator候補チェック」シートにはGREEN/YELLOWのみ表示します。\n' +
+      'YELLOWはDoctorのSERP確認後にCreator可否を確定してください。'
     );
     return results;
   } catch (e) {

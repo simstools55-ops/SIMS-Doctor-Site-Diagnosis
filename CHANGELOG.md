@@ -1,3 +1,12 @@
+## 0.6.3 - 2026-08-16
+
+- CreatorローカルゲートをGSC実績中心に再設計。候補KWそのものを既存記事が取得している場合はREDとしてCreator候補から除外。
+- 候補KWと強く近いクエリ（similarity >= 0.85）を既存記事が取得している場合はYELLOWとし、DoctorのSERP確認を必須化。
+- GREENは候補KW・強近似KWの既存担当記事が確認されない場合に限定。
+- Creator候補チェックの通常表示をGREEN / YELLOWに限定し、REDは集計のみ保持。
+- 判定理由を定型文から実GSC Evidence（既存URL、クエリ、表示回数、類似度）に変更。
+- Doctor結果取込後のHome「新規記事機会」件数を、一次検出数ではなく再判定後のGREEN + YELLOW件数へ変更。
+
 ## 0.6.2 - 2026-08-16
 
 - Creator SERP Doctor回答の取込操作を「確認する」メニューへ追加。
