@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.6.1';
+const SDSD_VERSION = '0.6.2';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -42,7 +42,10 @@ function onOpen() {
     .addItem('診断候補を見る', 'sdsdOpenCandidates')
     .addItem('個別精密診断対象を見る', 'sdsdOpenSelectedCases')
     .addItem('サイト治療計画を見る', 'sdsdOpenTreatmentPlan')
-    .addItem('Creator候補チェックを見る', 'sdsdOpenCreatorValidation');
+    .addSeparator()
+    .addItem('Creator候補チェックを見る', 'sdsdOpenCreatorValidation')
+    .addItem('Creator SERP確認紹介状を見る', 'sdsdOpenCreatorSerpReferral')
+    .addItem('Creator SERP Doctor回答を取り込む', 'sdsdShowCreatorSerpResultDialog');
 
   const manualMenu = ui.createMenu('保守・復旧操作')
     .addItem('Evidence Packageを読み込む', 'sdsdImportEvidencePackageZip')
@@ -6275,7 +6278,8 @@ function sdsdCreateCreatorSerpReferralFromSelected() {
       'Creator候補のSERP確認紹介状を作成しました。\n\n' +
       `候補キーワード: ${referral.candidate_keyword}\n\n` +
       '目的：実際の検索結果でライバルと検索意図を確認し、新記事として独立させる価値を最終確認します。\n' +
-      '次の操作：「Creator SERP確認」シートのMarkdownまたはJSONをSIMS Doctorへ渡してください。'
+      '次の操作：「Creator SERP確認」シートのMarkdownまたはJSONをSIMS Doctorへ渡してください。\n' +
+      'Doctor回答が返ったら、▶ 次に進む、または「確認する → Creator SERP Doctor回答を取り込む」から回答全文を貼り付けてください。'
     );
     return referral;
   } catch(e) {
@@ -6430,9 +6434,24 @@ function sdsdRegisterCreatorSerpResult(text) {
   };
 }
 
+function sdsdOpenCreatorSerpReferral() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName(SDSD_CONFIG.sheets.creatorSerpReferral);
+  if (!sh) {
+    SpreadsheetApp.getUi().alert(
+      'Creator SERP確認紹介状はまだ作成されていません。\n\n' +
+      '「Creator候補チェック」で対象行を選択し、\n' +
+      '設定・管理 → 保守・復旧操作 → Creator候補：選択案件のSERP確認紹介状を作成\n' +
+      'を実行してください。'
+    );
+    return;
+  }
+  ss.setActiveSheet(sh);
+}
+
 function sdsdShowCreatorSerpResultDialog() {
   const state = sdsdGetCreatorSerpState_();
-  const caseLabel = state.caseId ? `対象案件: ${state.caseId}` : '対象案件: Creator SERP確認中の案件';
+  const caseLabel = state.caseId ? `対象案件: ${state.caseId}` : '対象案件: JSON内のdiagnosis_case_idで照合します';
   const html = '<!doctype html><html><head><base target="_top"><meta charset="UTF-8"><style>' +
     'body{font-family:Arial,"Noto Sans JP",sans-serif;padding:18px;background:#f8f9fa;color:#202124}' +
     'h2{margin:0 0 6px;font-size:18px}.flow{background:#e8f0fe;color:#174ea6;padding:9px 11px;border-radius:7px;font-weight:700;font-size:12px;margin-bottom:10px}' +

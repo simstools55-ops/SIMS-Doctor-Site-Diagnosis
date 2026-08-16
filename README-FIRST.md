@@ -1,4 +1,4 @@
-# SIMS Doctor Site Diagnosis v0.6.1
+# SIMS Doctor Site Diagnosis v0.6.2
 
 SIMS Doctor Site Diagnosis は、Collectorで収集したEvidenceを読み込み、サイト全体の診断、個別精密診断、横断診断、Doctorへの引き渡しまでを案内する診断ワークスペースです。
 
@@ -26,7 +26,7 @@ Evidence Package読込後はそのままサイト診断へ進め、Doctor Packag
 処理を進めるときは `▶ 次に進む（Diagnosisに任せる）`、結果を見るときは `確認する` を使うのが基本です。
 
 
-## Creatorルート（v0.6.1）
+## Creatorルート（v0.6.2）
 
 Site Diagnosisは、新記事候補を「作らないための審査」ではなく、重大なカニバリを避けながら有望なロングテールへ挑戦するための機会として扱います。
 
@@ -63,7 +63,7 @@ Site Diagnosisは、1つのスプレッドシートで1サイトずつ診断す�
 
 から個別処理を実行できます。
 
-## v0.6.1の主な変更
+## v0.6.2の主な変更
 
 - Creator候補を通常の追加Evidence / Precision診断から分離
 - Creator候補チェック（GREEN / YELLOW / RED）とGSCクエリクラスター・役割分担・内部リンク候補を追加
@@ -96,4 +96,8 @@ Site Diagnosisは、1つのスプレッドシートで1サイトずつ診断す�
 
 既存のApps Script環境では、今回コード変更があるのは `Code.gs` です。
 
-配布物の `VERSION`、`README-FIRST.md`、`CHANGELOG.md` もv0.6.1へ更新されています。`appsscript.json` と `SITE-WIDE-RESULT-CONTRACT-V1.md` は内容変更なしです。
+配布物の `VERSION`、`README-FIRST.md`、`CHANGELOG.md` もv0.6.2へ更新されています。`appsscript.json` と `SITE-WIDE-RESULT-CONTRACT-V1.md` は内容変更なしです。
+
+## v0.6.2 Creator SERP回答取込導線
+
+Creator SERP確認後のDoctor回答は、`▶ 次に進む（Diagnosisに任せる）` または `確認する → Creator SERP Doctor回答を取り込む` から専用ダイアログへ貼り付けます。通常フローでSBMへ直接貼り付ける必要はありません。

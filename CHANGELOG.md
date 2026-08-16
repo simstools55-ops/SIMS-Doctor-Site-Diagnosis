@@ -1,3 +1,10 @@
+## 0.6.2 - 2026-08-16
+
+- Creator SERP Doctor回答の取込操作を「確認する」メニューへ追加。
+- `Creator SERP確認紹介状を見る` を追加し、紹介状と回答取込の所在を通常UIから確認可能にした。
+- Creator SERP紹介状生成完了時に、Doctor回答後は `▶ 次に進む` または通常メニューから取り込めることを明示。
+- 回答待ち状態が失われていても、Doctor結果JSONの `diagnosis_case_id` で案件照合できる旨を取込ダイアログに表示。
+
 ## v0.6.1
 
 - Fixed upgrade-state navigation so stored Creator candidates take priority over a legacy site-wide Precision package waiting state.
