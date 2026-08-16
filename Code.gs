@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.6.4';
+const SDSD_VERSION = '0.6.5';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -6066,7 +6066,25 @@ function sdsdCreatorCandidateValidation_(c, ctx) {
     reason = top
       ? `候補キーワードと強く近い既存クエリ「${top.query}」を ${top.article_url} が取得しています（類似度 ${top.similarity}、表示回数 ${Number(top.impressions||0)}）。追加語による独立意図があるかDoctorのSERP確認を行ってください。`
       : '既存記事に非常に近い検索意図が確認されます。独立ロングテールとして分離できるかDoctorのSERP確認を行ってください。';
-  } else if (best >= 0.55 || related.some(x => x.similarity >= 0.67)) {
+  } else {
+    // v0.6.5: GSCに一致/近似クエリが出ていなくても、Doctor一次診断の
+    // target_articles に既存URLがある案件は「既存記事なし」とみなさない。
+    // 少なくともYELLOWへ落とし、SERPで独立性を確認する。
+    const targetUrls = Array.from(new Set(((c && c.target_articles) || [])
+      .map(x => sdsdNormalizeUrl_(x && (x.article_url || x.url || '')))
+      .filter(Boolean)));
+    if (targetUrls.length) {
+      grade = 'YELLOW';
+      gate = 'SERP_REVIEW_BEFORE_CREATOR';
+      reason = `同一テーマに紐づく既存記事 ${targetUrls.slice(0,3).join(' / ')} が確認されています。GSCの完全一致がなくても既存記事との役割重複を否定できないため、DoctorのSERP確認後にCreator可否を決めてください。`;
+    } else if (best >= 0.55 || related.some(x => x.similarity >= 0.67)) {
+      grade = 'YELLOW';
+      gate = 'SERP_REVIEW_BEFORE_CREATOR';
+      reason = '関連する既存記事・近接クエリがあります。独立した検索意図として分離できる可能性は残るため、DoctorのSERP確認後にCreator可否を決めてください。';
+    }
+  }
+
+  if (grade === 'GREEN' && (best >= 0.55 || related.some(x => x.similarity >= 0.67))) {
     grade = 'YELLOW';
     gate = 'SERP_REVIEW_BEFORE_CREATOR';
     reason = '関連する既存記事・近接クエリがあります。独立した検索意図として分離できる可能性は残るため、DoctorのSERP確認後にCreator可否を決めてください。';
