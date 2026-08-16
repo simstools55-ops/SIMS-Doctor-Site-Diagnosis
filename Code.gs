@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.5.6';
+const SDSD_VERSION = '0.5.7';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -1665,13 +1665,17 @@ function sdsdShowSbmHandoffDialog_() {
     '<div class="flow">Site Diagnosis → Doctor → Diagnosis → SBM → Writer / Merge</div>' +
     '<div class="note">下のJSONをコピーし、SIMS-Blog-Managerの「SIMS Doctor → 5．Site Diagnosisの処置を進める」→「① DiagnosisからのDoctor診断結果を登録」へ貼り付けてください。SBMがWriter / Merge / 経過観察へ振り分けます。</div>' +
     '<textarea id="t" readonly></textarea><div class="actions"><button class="secondary" onclick="google.script.host.close()">閉じる</button><button class="primary" onclick="copyText()">SBM用JSONをコピー</button><button class="done" onclick="done()">SBMへの登録完了</button></div><div id="s" class="ok"></div>' +
-    '<script>const raw="' + encoded + '";function dec(x){x=x.replace(/-/g,"+").replace(/_/g,"/");while(x.length%4)x+="=";return decodeURIComponent(escape(atob(x)))}const t=document.getElementById("t");t.value=dec(raw);function copyText(){t.select();t.setSelectionRange(0,999999);navigator.clipboard.writeText(t.value).then(()=>document.getElementById("s").textContent="コピーしました。SBMへ貼り付けてください。").catch(()=>{document.execCommand("copy");document.getElementById("s").textContent="コピーしました。SBMへ貼り付けてください。"})}function done(){google.script.run.withSuccessHandler(()=>google.script.host.close()).sdsdMarkSbmHandoffComplete_()}</script></body></html>';
+    '<script>const raw="' + encoded + '";function dec(x){x=x.replace(/-/g,"+").replace(/_/g,"/");while(x.length%4)x+="=";return decodeURIComponent(escape(atob(x)))}const t=document.getElementById("t");t.value=dec(raw);function copyText(){t.select();t.setSelectionRange(0,999999);navigator.clipboard.writeText(t.value).then(()=>document.getElementById("s").textContent="コピーしました。SBMへ貼り付けてください。").catch(()=>{document.execCommand("copy");document.getElementById("s").textContent="コピーしました。SBMへ貼り付けてください。"})}function done(){const s=document.getElementById("s");s.textContent="登録完了を記録しています...";google.script.run.withSuccessHandler(()=>{s.textContent="SBMへの登録完了を記録しました。";setTimeout(()=>google.script.host.close(),500)}).withFailureHandler(err=>{const msg=(err&&err.message)?err.message:String(err||"不明なエラー");s.textContent="登録完了を記録できませんでした："+msg}).sdsdMarkSbmHandoffComplete()}</script></body></html>';
 
   sdsdSetSbmHandoffState_('WAITING_SBM_REGISTRATION');
   SpreadsheetApp.getUi().showModalDialog(
     HtmlService.createHtmlOutput(html).setWidth(840).setHeight(650),
     'SBMへ診断結果を引き渡す'
   );
+}
+
+function sdsdMarkSbmHandoffComplete() {
+  return sdsdMarkSbmHandoffComplete_();
 }
 
 function sdsdMarkSbmHandoffComplete_() {
