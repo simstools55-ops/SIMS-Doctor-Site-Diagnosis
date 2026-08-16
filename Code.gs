@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.5.8';
+const SDSD_VERSION = '0.5.9';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -63,6 +63,9 @@ function onOpen() {
   const otherMenu = ui.createMenu('その他・管理')
     .addItem('現在の診断状況を確認', 'sdsdShowCurrentSessionStatus')
     .addItem('現在の診断を終了', 'sdsdEndCurrentDiagnosisSession')
+    .addSeparator()
+    .addItem('ZIP保存先を設定', 'sdsdChooseOutputFolder')
+    .addItem('現在のZIP保存先を確認', 'sdsdShowOutputFolder')
     .addSeparator()
     .addItem('初期設定を実行', 'sdsdInitialize')
     .addSubMenu(manualMenu);
@@ -2678,7 +2681,8 @@ function sdsdExportDoctorCasePackageZip(options) {
       'yyyyMMdd-HHmmss'
     )}.zip`;
 
-  const file = DriveApp.createFile(Utilities.zip(blobs, zipName));
+  const created = sdsdCreateZipInOutputFolder_(blobs, zipName);
+  const file = created.file;
 
   const result = {
     caseCount: rows.length,
@@ -2691,15 +2695,122 @@ function sdsdExportDoctorCasePackageZip(options) {
   };
 
   if (!options.silent) {
-    SpreadsheetApp.getUi().alert(
-      `Doctor Case Packageの生成が完了しました。\n\n` +
-      `案件数: ${result.caseCount}件\n` +
-      `本文再取得: ${result.refetched}件\n` +
-      `SBM ArticleID使用: ${result.realArticleIdCount}件 / URL自動識別: ${result.surrogateArticleIdCount}件\n\n` +
-      `Google Driveに保存しました。\n${result.fileUrl}`
+    sdsdShowZipExportComplete_(
+      'Doctor Case Packageの生成が完了しました。',
+      [
+        `案件数: ${result.caseCount}件`,
+        `本文再取得: ${result.refetched}件`,
+        `SBM ArticleID使用: ${result.realArticleIdCount}件 / URL自動識別: ${result.surrogateArticleIdCount}件`
+      ],
+      file,
+      created.folderInfo,
+      'このZIPをSIMS Doctorへ渡してください。'
     );
   }
   return result;
+}
+
+// ============================================================================
+// Source: OutputFolderSettings.gs
+// ============================================================================
+const SDSD_OUTPUT_FOLDER_PROP = 'SDSD_OUTPUT_FOLDER_ID';
+
+function sdsdOutputFolderInfo_() {
+  const props = PropertiesService.getDocumentProperties();
+  const id = String(props.getProperty(SDSD_OUTPUT_FOLDER_PROP) || '').trim();
+  if (id) {
+    try {
+      const folder = DriveApp.getFolderById(id);
+      return {id:folder.getId(),name:folder.getName(),url:folder.getUrl(),isDefault:false,folder:folder};
+    } catch (e) {
+      props.deleteProperty(SDSD_OUTPUT_FOLDER_PROP);
+    }
+  }
+  const root = DriveApp.getRootFolder();
+  return {id:root.getId(),name:'マイドライブ',url:'https://drive.google.com/drive/my-drive',isDefault:true,folder:root};
+}
+
+function sdsdShowOutputFolder() {
+  const info = sdsdOutputFolderInfo_();
+  SpreadsheetApp.getUi().alert(
+    '現在のZIP保存先\n\n' +
+    'フォルダー: ' + info.name + '\n' +
+    (info.isDefault ? '状態: 未設定のためマイドライブ直下を使用\n' : '状態: 保存先設定済み\n') +
+    '\n' + info.url
+  );
+}
+
+function sdsdChooseOutputFolder() {
+  const current = sdsdOutputFolderInfo_();
+  const root = DriveApp.getRootFolder();
+  const html = HtmlService.createHtmlOutput(sdsdOutputFolderPickerHtml_({
+    folderId:root.getId(),currentFolderId:current.id,currentFolderName:current.name
+  })).setWidth(720).setHeight(560);
+  SpreadsheetApp.getUi().showModalDialog(html, 'ZIP保存先を設定');
+}
+
+function sdsdListOutputFolderPickerFolder(folderId) {
+  const folder = folderId ? DriveApp.getFolderById(String(folderId)) : DriveApp.getRootFolder();
+  const folders = [];
+  const it = folder.getFolders();
+  while (it.hasNext()) { const f=it.next(); folders.push({id:f.getId(),name:f.getName()}); }
+  folders.sort((a,b)=>String(a.name).localeCompare(String(b.name),'ja'));
+  let parent=null;
+  const parents=folder.getParents();
+  if (parents.hasNext()) { const p=parents.next(); parent={id:p.getId(),name:p.getName()}; }
+  return {id:folder.getId(),name:folder.getName()||'マイドライブ',parent:parent,folders:folders};
+}
+
+function sdsdSetOutputFolder(payload) {
+  const folderId=String(payload&&payload.folderId||'').trim();
+  if(!folderId) throw new Error('保存先フォルダーが選択されていません。');
+  const folder=DriveApp.getFolderById(folderId);
+  PropertiesService.getDocumentProperties().setProperty(SDSD_OUTPUT_FOLDER_PROP,folder.getId());
+  return {id:folder.getId(),name:folder.getName(),url:folder.getUrl()};
+}
+
+function sdsdOutputFolderPickerHtml_(o) {
+  const data=JSON.stringify(o||{}).replace(/</g,'\\u003c');
+  return `<!doctype html><html><head><base target="_top"><style>
+  body{font-family:Arial,"Noto Sans JP",sans-serif;margin:0;background:#f8fafd;color:#202124}.wrap{padding:20px}
+  .hero{background:#185abc;color:#fff;padding:16px 18px;border-radius:10px}.hero h2{margin:0 0 5px;font-size:20px}.hero p{margin:0;font-size:13px}
+  .current{background:#e8f0fe;border:1px solid #aecbfa;border-radius:8px;padding:10px 12px;margin-top:12px;font-size:13px}
+  .card{background:#fff;border:1px solid #dadce0;border-radius:10px;margin-top:12px;padding:14px}.bar{display:flex;gap:8px;align-items:center}.where{flex:1;font-weight:bold;color:#174ea6}
+  button{border:1px solid #dadce0;background:#fff;border-radius:6px;padding:8px 12px;cursor:pointer}button.primary{background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:bold}
+  .list{height:260px;overflow:auto;border:1px solid #e0e0e0;border-radius:7px;margin-top:10px}.row{padding:10px 11px;border-bottom:1px solid #f1f3f4;cursor:pointer}.row:hover{background:#f8f9fa}
+  .hint{color:#5f6368;font-size:12px;margin-top:8px}.err{color:#b3261e;margin-top:8px}.actions{text-align:right;margin-top:14px}
+  </style></head><body><div class="wrap"><div class="hero"><h2>ZIP保存先を設定</h2><p>Evidence / Doctor Packageを保存するGoogle Driveフォルダーを選びます。</p></div>
+  <div class="current">現在の保存先：<b id="currentName"></b></div>
+  <div class="card"><div class="bar"><button id="up">↑ 上へ</button><div id="where" class="where"></div></div><div id="list" class="list"></div><div class="hint">📁 フォルダーをクリックして移動し、表示中のフォルダーを保存先に設定してください。</div></div>
+  <div id="err" class="err"></div><div class="actions"><button onclick="google.script.host.close()">キャンセル</button> <button id="set" class="primary">このフォルダーを保存先にする</button></div>
+  </div><script>
+  const init=${data};let current=null;
+  const esc=s=>String(s||'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
+  document.getElementById('currentName').textContent=init.currentFolderName||'マイドライブ';
+  function fail(e){document.getElementById('err').textContent=(e&&e.message)||e;}
+  function load(id){document.getElementById('list').innerHTML='<div class="row">読み込み中...</div>';google.script.run.withSuccessHandler(render).withFailureHandler(fail).sdsdListOutputFolderPickerFolder(id);}
+  function render(d){current=d;document.getElementById('where').textContent=d.name||'マイドライブ';document.getElementById('up').disabled=!d.parent;const box=document.getElementById('list');box.innerHTML='';d.folders.forEach(f=>{const x=document.createElement('div');x.className='row';x.textContent='📁 '+f.name;x.onclick=()=>load(f.id);box.appendChild(x);});if(!d.folders.length)box.innerHTML='<div class="row" style="cursor:default;color:#5f6368">このフォルダー内にサブフォルダーはありません。</div>';}
+  document.getElementById('up').onclick=()=>{if(current&&current.parent)load(current.parent.id);};
+  document.getElementById('set').onclick=()=>{if(!current)return;const b=document.getElementById('set');b.disabled=true;b.textContent='設定中...';google.script.run.withSuccessHandler(r=>{document.getElementById('currentName').textContent=r.name;b.textContent='設定完了';setTimeout(()=>google.script.host.close(),900);}).withFailureHandler(e=>{b.disabled=false;b.textContent='このフォルダーを保存先にする';fail(e);}).sdsdSetOutputFolder({folderId:current.id});};
+  load(init.folderId);
+  </script></body></html>`;
+}
+
+function sdsdCreateZipInOutputFolder_(blobs, zipName) {
+  const info=sdsdOutputFolderInfo_();
+  const file=info.folder.createFile(Utilities.zip(blobs,zipName));
+  return {file:file,folderInfo:info};
+}
+
+function sdsdShowZipExportComplete_(title, detailLines, file, folderInfo, nextText) {
+  const lines=Array.isArray(detailLines)?detailLines:[];
+  SpreadsheetApp.getUi().alert(
+    String(title||'ZIP Packageを生成しました。')+'\n\n'+
+    (lines.length?lines.join('\n')+'\n\n':'')+
+    'ZIPファイル: '+file.getName()+'\n'+
+    '保存先: '+folderInfo.name+'\n\n'+
+    file.getUrl()+(nextText?'\n\n'+nextText:'')
+  );
 }
 
 // ============================================================================
@@ -5127,14 +5238,15 @@ function sdsdExportSiteWideDoctorPackage() {
         'yyyyMMdd-HHmmss'
       )}.zip`;
 
-    const file = DriveApp.createFile(Utilities.zip(blobs, zipName));
+    const created = sdsdCreateZipInOutputFolder_(blobs, zipName);
+    const file = created.file;
 
-    SpreadsheetApp.getUi().alert(
-      `サイト横断Doctor Packageを生成しました。\n\n` +
-      `案件数: ${rows.length}件\n` +
-      `保存先: Google Drive\n\n` +
-      `${file.getUrl()}\n\n` +
-      `このZIPをSIMS Doctorへ渡してください。`
+    sdsdShowZipExportComplete_(
+      'サイト横断Doctor Packageを生成しました。',
+      [`案件数: ${rows.length}件`],
+      file,
+      created.folderInfo,
+      'このZIPをSIMS Doctorへ渡してください。'
     );
 
     return {
@@ -5789,7 +5901,8 @@ function sdsdExportPriorityPrecisionClusterPackage() {
         'yyyyMMdd-HHmmss'
       )}.zip`;
 
-    const file = DriveApp.createFile(Utilities.zip(blobs, zipName));
+    const created = sdsdCreateZipInOutputFolder_(blobs, zipName);
+    const file = created.file;
 
     sdsdSetSiteWidePrecisionPackageState_({
       status:'WAITING_DOCTOR_RESULT',
@@ -5799,13 +5912,12 @@ function sdsdExportPriorityPrecisionClusterPackage() {
       clusterCount:cases.length
     });
 
-    ui.alert(
-      `サイト横断の精密診断Packageを生成しました。\n\n` +
-      `優先クラスタ: ${cases.length}件\n` +
-      `ZIPファイル: ${zipName}\n` +
-      `保存先: Google Drive\n\n` +
-      `${file.getUrl()}\n\n` +
-      `このZIPをSIMS Doctorへ渡してください。`
+    sdsdShowZipExportComplete_(
+      'サイト横断の精密診断Packageを生成しました。',
+      [`優先クラスタ: ${cases.length}件`],
+      file,
+      created.folderInfo,
+      'このZIPをSIMS Doctorへ渡してください。'
     );
 
     return {
