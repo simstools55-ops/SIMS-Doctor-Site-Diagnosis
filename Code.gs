@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.8.0';
+const SDSD_VERSION = '0.8.1';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -210,7 +210,7 @@ function sdsdHomeGuide_(session,m,work,stored){
   }
 
   const individualPackage=sdsdGetIndividualDoctorPackageState_();
-  if(individualPackage.status==='WAITING_DOCTOR_RESULT'){
+  if(individualPackage.status==='WAITING_DOCTOR_RESULT' || individualPackage.status==='PACKAGE_READY_FOR_DOCTOR'){
     return {
       title:'Doctor結果をSIMS-Blog-Managerへ登録してください',
       reason:'個別精密診断Packageは生成済みです。Doctorから返った各記事の診断結果はSBMへ登録し、完了後にDiagnosisへ引き渡し完了を記録します。',
@@ -1041,7 +1041,8 @@ function sdsdShowIndividualDoctorResultWaiting_() {
   const answer = ui.alert(
     'Doctor結果をSBMへ登録',
     '個別精密診断Packageは生成済みです。\n\n' +
-    'SIMS Doctorから返った各記事の診断結果JSONは、DiagnosisではなくSIMS-Blog-Managerへ登録してください。' +
+    'まず、このPackageをSIMS Doctorへ渡して精密診断を依頼してください。\n' +
+    'Doctorから回答が返ったら、各記事の診断結果JSONをSIMS-Blog-Managerへ登録してください。' +
     detail + '\n\n' +
     'Doctor結果のSBMへの登録は完了しましたか？',
     ui.ButtonSet.YES_NO
@@ -1051,7 +1052,7 @@ function sdsdShowIndividualDoctorResultWaiting_() {
     ui.alert(
       'Doctor結果待ちです。\n\n' +
       'SIMS Doctorの回答から各記事の診断結果JSONをSIMS-Blog-Managerへ登録してください。\n' +
-      '登録が終わったら、もう一度「▶ 次に進む（Diagnosisに任せる）」を実行してください。'
+      '登録が終わったら、もう一度「1. Site Diagnosisを進める」を実行してください。'
     );
     return false;
   }
@@ -1061,7 +1062,7 @@ function sdsdShowIndividualDoctorResultWaiting_() {
     '個別精密診断の引き渡しを完了として記録しました。\n\n' +
     `SBMへ引き渡し済み: ${count}記事\n\n` +
     '同じ記事は、この診断セッションでは個別精密診断の対象として再選定しません。\n' +
-    '続きは「▶ 次に進む（Diagnosisに任せる）」で進められます。'
+    '続きは「1. Site Diagnosisを進める」で進められます。'
   );
   return true;
 }
@@ -1324,27 +1325,73 @@ function sdsdRunProductDiagnosis() {
 }
 
 
+
+function sdsdIndividualEnrichmentProgress_(){
+  const sh=SpreadsheetApp.getActive().getSheetByName(SDSD_CONFIG.sheets.selectedCases);
+  if(!sh || sh.getLastRow()<2)return {active:false,total:0,ready:0,review:0,pending:0};
+
+  const values=sh.getDataRange().getDisplayValues();
+  const headers=values[0].map(String);
+  const urlIdx=headers.indexOf('URL');
+  const refIdx=headers.indexOf('Referral Status');
+  const pkgIdx=headers.indexOf('Case Package Status');
+  if(urlIdx<0 || refIdx<0)return {active:false,total:0,ready:0,review:0,pending:0};
+
+  let total=0,ready=0,review=0;
+  values.slice(1).forEach(r=>{
+    if(!String(r[urlIdx]||'').trim())return;
+    total++;
+    const rs=String(r[refIdx]||'');
+    const ps=pkgIdx>=0?String(r[pkgIdx]||''):'';
+    if(rs==='READY_FOR_INDIVIDUAL_DOCTOR' && ps==='READY')ready++;
+    else if(rs==='NEEDS_CASE_ENRICHMENT_REVIEW')review++;
+  });
+  return {
+    active:total>0 && (ready>0 || review>0),
+    total:total,
+    ready:ready,
+    review:review,
+    pending:Math.max(total-ready-review,0)
+  };
+}
+
+function sdsdHasResumableIndividualEnrichment_(){
+  const p=sdsdIndividualEnrichmentProgress_();
+  return p.active && p.pending>0;
+}
+
 function sdsdProceedIndividualPrecisionDiagnosis(){
   const ui=SpreadsheetApp.getUi();
   try{
-    sdsdProgress_(1,4,'Diagnosisが優先記事を自動選定しています');
-    const batch=sdsdBuildTreatmentBatch({silent:true,noActivate:true});
-    const guard=sdsdRunFinalGuard({silent:true});
-    sdsdUpdateSummaryAfterBatch_(batch,guard);
-    sdsdHideInternalSheets_();
+    const before=sdsdIndividualEnrichmentProgress_();
+    let batch=null;
 
-    if(!batch.selectedCount){
-      ui.alert(
-        '個別精密診断へ送る記事はありません。\n\n' +
-        'Diagnosisが優先度・処置履歴・リスクを確認しましたが、現在Doctorへ送る適格記事はありませんでした。\n' +
-        'Homeの「次に行うこと」を確認してください。'
-      );
-      try{sdsdRenderHome_();}catch(e){}
-      return;
+    if(sdsdHasResumableIndividualEnrichment_()){
+      batch={
+        selectedCount:before.total,
+        resumed:true
+      };
+      sdsdProgress_(1,4,`個別精密診断を再開しています（${before.ready}/${before.total}件準備済み）`);
+    }else{
+      sdsdProgress_(1,4,'Diagnosisが優先記事を自動選定しています');
+      batch=sdsdBuildTreatmentBatch({silent:true,noActivate:true});
+      const guard=sdsdRunFinalGuard({silent:true});
+      sdsdUpdateSummaryAfterBatch_(batch,guard);
+      sdsdHideInternalSheets_();
+
+      if(!batch.selectedCount){
+        ui.alert(
+          '個別精密診断へ送る記事はありません。\n\n' +
+          'Diagnosisが優先度・処置履歴・リスクを確認しましたが、現在Doctorへ送る適格記事はありませんでした。\n' +
+          'Homeの「次に行うこと」を確認してください。'
+        );
+        try{sdsdRenderHome_();}catch(e){}
+        return;
+      }
     }
 
     sdsdProgress_(2,4,'記事識別情報を自動解決しています');
-    const coverage=sdsdArticleMasterCoverageForSelected_();
+    sdsdArticleMasterCoverageForSelected_();
 
     sdsdProgress_(3,4,'記事本文と主要クエリを準備しています');
     const enrichment=sdsdEnrichSelectedCases({silent:true,maxPerRun:3});
@@ -1355,8 +1402,7 @@ function sdsdProceedIndividualPrecisionDiagnosis(){
         `精密診断Packageの準備中に、追加確認が必要な記事が見つかりました。\n\n` +
         `準備完了: ${enrichment.ready}/${enrichment.total}件\n` +
         `要確認: ${enrichment.review}件\n\n` +
-        '「確認する → 個別精密診断対象を見る」で内容を確認してください。\n' +
-        '利用者判断が不要な案件はDiagnosis側で処理を続けます。'
+        '「確認する → 個別精密診断対象を見る」で内容を確認してください。'
       );
       try{sdsdRenderHome_();}catch(e){}
       return;
@@ -1364,12 +1410,15 @@ function sdsdProceedIndividualPrecisionDiagnosis(){
 
     if(!enrichment.complete){
       ui.alert(
-        `精密診断Packageを準備しています。\n\n` +
-        `準備完了: ${enrichment.ready}/${enrichment.total}件\n` +
+        `個別精密診断を分割して準備しています。\n\n` +
+        `全体: ${enrichment.total}件\n` +
+        `準備完了: ${enrichment.ready}件\n` +
         `残り: ${enrichment.pending}件\n\n` +
-        'Apps Scriptの安全な実行時間内で分割しています。\n' +
-        '同じ「▶ 次に進む（Diagnosisに任せる）」をもう一度実行すると、自動的に続きから再開します。'
+        'Apps Scriptの安全な実行時間内で一度区切りました。\n' +
+        '「OK」を押したあと、もう一度「1. Site Diagnosisを進める」を開いてください。\n' +
+        `次回は準備済み${enrichment.ready}件を作り直さず、残り${enrichment.pending}件から再開します。`
       );
+      sdsdSetWorkflowState_({status:'INDIVIDUAL_ENRICHMENT_PARTIAL'});
       try{sdsdRenderHome_();}catch(e){}
       return;
     }
@@ -1377,23 +1426,23 @@ function sdsdProceedIndividualPrecisionDiagnosis(){
     sdsdProgress_(4,4,'Doctor精密診断Packageを生成しています');
     const exported=sdsdExportDoctorCasePackageZip({silent:true});
     sdsdSetIndividualDoctorPackageState_({
-      status:'WAITING_DOCTOR_RESULT',
+      status:'PACKAGE_READY_FOR_DOCTOR',
       batchId:sdsdGetActiveBatchId_(),
       fileUrl:exported.fileUrl,
       fileName:exported.fileName,
       caseCount:exported.caseCount
     });
     sdsdUpdateSummaryAfterPackage_(exported.caseCount,exported.fileUrl);
+    sdsdSetWorkflowState_({status:'INDIVIDUAL_PACKAGE_READY'});
     try{sdsdRefreshSelectedCasesView_();}catch(e){}
     try{sdsdRenderHome_();}catch(e){}
 
     ui.alert(
       `Doctor精密診断Packageを生成しました。\n\n` +
       `対象: ${exported.caseCount}記事\n` +
-      `ファイル: ${exported.fileName}\n` +
-      `SBM ArticleID使用: ${exported.realArticleIdCount}件 / URL自動識別: ${exported.surrogateArticleIdCount}件\n\n` +
-      'Diagnosisが対象選定・記事識別・現在タイトル確認・本文取得・クエリ準備まで行いました。\n' +
-      'このPackageをSIMS Doctorへ渡してください。\n\n' +
+      `ファイル: ${exported.fileName}\n\n` +
+      '次に、このPackageをSIMS Doctorへ渡して精密診断を依頼してください。\n' +
+      'Doctorから回答が返ったら、各記事の診断結果をSBMへ登録します。\n\n' +
       exported.fileUrl
     );
   }catch(e){
@@ -2042,12 +2091,23 @@ function sdsdWorkflowStep_(route){
     };
   }
 
+  const individualProgress=sdsdIndividualEnrichmentProgress_();
+  if(individualProgress.active && individualProgress.pending>0){
+    return {
+      code:'INDIVIDUAL_PRECISION',
+      title:`個別精密診断を再開します（${individualProgress.ready}/${individualProgress.total}件準備済み）`,
+      detail:`全${individualProgress.total}件のうち${individualProgress.ready}件は準備済みです。残り${individualProgress.pending}件から再開し、準備済みの記事は作り直しません。`,
+      button:`残り${individualProgress.pending}件の準備を続ける`
+    };
+  }
+
   const individualEligible=sdsdEligibleIndividualPrecisionCount_();
   if(individualEligible>0){
+    const workNow=sdsdSessionWorkSummary_();
     return {
       code:'INDIVIDUAL_PRECISION',
       title:`優先記事${individualEligible}件を詳しく診断します`,
-      detail:'既存記事の悪化・順位低下・高リスク候補を優先してDoctorへ渡します。',
+      detail:`追加確認が必要な案件は${Number(workNow.additionalEvidence||0)}件あります。その中から優先度の高い${individualEligible}記事を先に個別精密診断します。`,
       button:'個別精密診断を進める'
     };
   }
@@ -7974,7 +8034,7 @@ function sdsdRegisterSiteWideDoctorResult() {
         `Merge: ${counts.MERGE || 0}件\n` +
         `Creator: ${counts.CREATOR || 0}件\n` +
         `経過観察/処置不要: ${(counts.MONITOR || 0) + (counts.NO_ACTION || 0)}件\n\n` +
-        `続きは「▶ 次に進む（Diagnosisに任せる）」で進められます。`
+        `続きは「1. Site Diagnosisを進める」で進められます。`
       )
       : (
         `Doctor診断結果を登録しました。\n\n` +

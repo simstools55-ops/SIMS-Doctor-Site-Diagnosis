@@ -1,35 +1,21 @@
-# SIMS Doctor Site Diagnosis v0.8.0 Patch
+# SIMS Doctor Site Diagnosis v0.8.1 Patch
 
-Base: v0.7.4
+Base: v0.8.0
 
-## Major workflow change
+## P1 fix
+Individual precision diagnosis batch preparation now resumes correctly.
 
-Site Diagnosis now has two large user-facing flows:
+Previously every click rebuilt the selected treatment batch, clearing the three already
+prepared rows. This caused the progress to remain at 3/9 indefinitely.
 
-1. Existing article diagnosis / treatment
-2. New article opportunity / Creator
+v0.8.1 detects an unfinished selected-case batch and reuses it. A 9-case batch therefore
+progresses 3/9 -> 6/9 -> 9/9 instead of restarting at 3/9.
 
-After the Collector Evidence Package is loaded, Diagnosis analyzes the whole site first.
-It compares both flows and recommends which one should be handled first.
+## UI improvements from the v0.8.0 field test
+- Resume dialog shows prepared / total / remaining counts.
+- The next button says how many remaining cases will be prepared.
+- Old `次に進む（Diagnosisに任せる）` wording is replaced by `1. Site Diagnosisを進める`.
+- After package creation, the UI explicitly instructs the user to give the ZIP to SIMS Doctor.
+- The progress dialog explains the relationship between all additional-Evidence cases and the current high-priority individual batch.
 
-Normal operation starts from:
-
-`1. Site Diagnosisを進める`
-
-A modal workflow controller shows the current route, current step, required input/output,
-and the next action. The user can close the dialog at any time. The selected route and
-workflow state remain saved, so opening the same command resumes from the current step.
-
-The user can switch to the other large flow without discarding completed work.
-
-## Priority principle
-
-Existing-article issues receive higher priority when there are strong A1/A2 candidates or
-clear severe / traffic / ranking declines. Creator receives priority when new-article
-opportunities and content gaps outweigh urgent existing-article work.
-
-The recommendation is advisory. The user can choose the other route.
-
-## Compatibility
-
-Underlying Doctor, Evidence, SBM handoff, Writer, Merge and Creator contracts are unchanged.
+No Doctor/SBM contract changes are included.
