@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.6.3';
+const SDSD_VERSION = '0.6.4';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -6504,21 +6504,27 @@ function sdsdShowCreatorSerpResultDialog() {
   );
 }
 
+function sdsdRefreshCreatorValidationSheet_() {
+  const results = sdsdCreatorCandidateValidations_();
+  if (!results.length) return [];
+  sdsdWriteCreatorValidationSheet_(results);
+  return results;
+}
+
 function sdsdOpenCreatorValidation() {
   const ss = SpreadsheetApp.getActive();
-  let sh = ss.getSheetByName(SDSD_CONFIG.sheets.creatorValidation);
-  if (!sh) {
-    const pending = sdsdCreatorValidationCases_().length;
-    if (!pending) {
-      SpreadsheetApp.getUi().alert('現在、新記事作成前チェックの対象案件はありません。');
-      return;
-    }
-    // v0.6.1: migrate v0.5.x/v0.6.0 stored Doctor cases on demand instead of
-    // asking the user to find and run a separate maintenance/menu command.
-    sdsdRunCreatorCandidateValidation();
-    sh = ss.getSheetByName(SDSD_CONFIG.sheets.creatorValidation);
-    if (!sh) return;
+  const pending = sdsdCreatorValidationCases_().length;
+  if (!pending) {
+    SpreadsheetApp.getUi().alert('現在、新記事作成前チェックの対象案件はありません。');
+    return;
   }
+
+  // v0.6.4: Creator候補チェックは保存済みシートをそのまま再利用しない。
+  // 判定ロジックをPATCHした後も旧GREEN判定が残らないよう、開くたびに
+  // 現在のDoctor結果 + GSC Evidenceから再判定してシートを書き直す。
+  sdsdRefreshCreatorValidationSheet_();
+  const sh = ss.getSheetByName(SDSD_CONFIG.sheets.creatorValidation);
+  if (!sh) return;
   ss.setActiveSheet(sh);
 }
 
