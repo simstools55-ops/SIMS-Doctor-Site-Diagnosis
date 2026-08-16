@@ -1,15 +1,24 @@
-# SIMS Doctor Site Diagnosis v0.7.3
+# SIMS Doctor Site Diagnosis v0.7.4 Patch
 
-PATCH for Creator new-article identity semantics at the Site Diagnosis -> SBM handoff boundary.
+Base: v0.7.3
 
-## Apps Script replacement
-- Replace: `Code.gs`
-- No other Apps Script files are required.
+## Purpose
 
-## Main fix
-A Creator long-tail case no longer presents an existing related article as the actual `対象記事` in Site Diagnosis. The treatment plan now shows the true target as a not-yet-published new article and its candidate keyword.
+Improve completion visibility after Site Diagnosis results are registered in SBM.
 
-For backward compatibility with the current SBM identity verification, existing related articles are still carried only as reference/bridge identity data. v0.7.3 marks that role explicitly with `REFERENCE_ONLY`, adds `new_article_target`, `reference_articles`, and `article_identity_semantics`, and keeps the existing bridge payload usable until SBM consumes the new semantics directly.
+## Changed
 
-## Version consistency
-`Code.gs`, `VERSION`, README, CHANGELOG, and release notes are aligned to v0.7.3.
+- After "SBMへの登録完了" is recorded, the Site Treatment Plan is refreshed immediately.
+- Rows already handed to SBM are shown in gray.
+- Their status is changed to "SBM引き渡し済み".
+- NO_ACTION rows show "SBM引き渡し済み（処置不要）".
+- NEEDS_EVIDENCE rows are intentionally left active and are not grayed out.
+- The completed styling is re-applied whenever the treatment plan is regenerated, as long as the saved handoff fingerprint still matches the current payload.
+
+## Unchanged
+
+- Creator / Writer / Merge / Monitor routing
+- Creator new-article identity semantics introduced in v0.7.3
+- Evidence Package generation
+- ZIP output folder selection
+- Doctor result import

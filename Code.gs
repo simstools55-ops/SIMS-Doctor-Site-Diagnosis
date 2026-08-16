@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.7.3';
+const SDSD_VERSION = '0.7.4';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -1794,6 +1794,12 @@ function sdsdMarkSbmHandoffComplete_() {
   const props = PropertiesService.getDocumentProperties();
   props.setProperty('SDSD_SBM_HANDOFF_FINGERPRINT', sdsdSbmHandoffFingerprint_());
   sdsdSetSbmHandoffState_('COMPLETE');
+  try {
+    const stored = sdsdReadStoredSiteWideResult_();
+    if (stored && Array.isArray(stored.diagnosis_cases)) {
+      sdsdWriteTreatmentPlan_(stored);
+    }
+  } catch (e) {}
   try { sdsdRenderHome_(); } catch (e) {}
   return true;
 }
@@ -7420,6 +7426,32 @@ function sdsdStoreSiteWideResult_(obj) {
   );
 }
 
+
+function sdsdApplyTreatmentPlanCompletionStyle_(sh, cases) {
+  if (!sh || !Array.isArray(cases) || !cases.length) return;
+  if (!sdsdIsSbmHandoffCurrent_()) return;
+
+  const statusCol = 13;
+  cases.forEach((c, i) => {
+    const route = String(c && c.route_to || '').toUpperCase();
+    if (!route || route === 'NEEDS_EVIDENCE') return;
+
+    const row = i + 2;
+    sh.getRange(row, 1, 1, 13)
+      .setBackground('#F1F3F4')
+      .setFontColor('#80868B');
+
+    const statusText = route === 'NO_ACTION'
+      ? 'SBM引き渡し済み（処置不要）'
+      : 'SBM引き渡し済み';
+
+    sh.getRange(row, statusCol)
+      .setValue(statusText)
+      .setFontWeight('bold')
+      .setFontColor('#5F6368');
+  });
+}
+
 function sdsdWriteTreatmentPlan_(obj) {
   const ss = SpreadsheetApp.getActive();
   let sh = ss.getSheetByName(SDSD_CONFIG.sheets.treatmentPlan);
@@ -7488,6 +7520,8 @@ function sdsdWriteTreatmentPlan_(obj) {
   sh.getRange(1,1,Math.max(rows.length+1,1),headers.length).setWrap(true);
   [70,260,220,220,430,360,360,420,300,90,460,360,130]
     .forEach((w,i) => sh.setColumnWidth(i+1,w));
+
+  sdsdApplyTreatmentPlanCompletionStyle_(sh, obj.diagnosis_cases || []);
 
   ss.setActiveSheet(sh);
   return rows.length;
