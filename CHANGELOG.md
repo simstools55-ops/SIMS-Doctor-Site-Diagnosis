@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## v0.9.0
+
+- Added Diagnosis Session History v1 keyed by site_id/host.
+- Added hidden `_SDSD_DIAGNOSIS_SESSIONS` and `_SDSD_DIAGNOSIS_CASE_HISTORY` stores.
+- Added previous-session summary to Diagnosis Home.
+- Expanded Home site-wide analysis comment display to prevent clipping.
+- Preserved the existing Collector-is-stateless / Diagnosis-keeps-history responsibility split.
+
 ## v0.8.4
 
 - Prevented already-completed SBM handoff cases from reviving after the same Doctor result is re-imported.

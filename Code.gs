@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.8.4';
+const SDSD_VERSION = '0.9.0';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -21,7 +21,9 @@ const SDSD_CONFIG = Object.freeze({
     siteWideResultImport: 'Doctor結果取込',
     creatorValidation: 'Creator候補チェック',
     creatorSerpReferral: 'Creator SERP確認',
-    longtailDiscovery: 'ロングテール探索'
+    longtailDiscovery: 'ロングテール探索',
+    diagnosisSessions: '_SDSD_DIAGNOSIS_SESSIONS',
+    diagnosisCaseHistory: '_SDSD_DIAGNOSIS_CASE_HISTORY'
   },
   score: {
     demandMax: 30,
@@ -79,6 +81,7 @@ function onOpen() {
 
   const otherMenu = ui.createMenu('設定・管理')
     .addItem('現在の診断状況を確認', 'sdsdShowCurrentSessionStatus')
+    .addItem('診断セッション履歴を見る', 'sdsdShowDiagnosisSessionHistory')
     .addItem('現在の診断を終了', 'sdsdEndCurrentDiagnosisSession')
     .addSeparator()
     .addItem('ZIP保存先', 'sdsdChooseOutputFolder')
@@ -413,6 +416,9 @@ function sdsdRenderHome_(){
     ['コンテンツギャップ',metrics.gap+'件']
   ]);
   sh.getRange('F5:H9').merge().setValue(sdsdHomeComment_(metrics,stored));
+  const previousSession=sdsdPreviousDiagnosisSession_(session.siteId||session.host,session.sessionId||'');
+  sh.getRange('A10:B10').setValues([['前回診断',previousSession?sdsdFormatSessionHistoryLabel_(previousSession):'履歴なし']]);
+  sh.getRange('D10:H10').merge().setValue(previousSession?sdsdFormatSessionHistorySummary_(previousSession):'このサイトの過去診断はまだありません。');
 
   sh.getRange('A11:H11').merge().setValue('Diagnosisの判断');
   sh.getRange('A12:H13').merge().setValue(overall.note);
@@ -432,14 +438,15 @@ function sdsdRenderHome_(){
   sh.getRange('A2:H2').setBackground('#D2E3FC').setFontColor('#174EA6').setFontSize(11);
   sh.getRange('A3:H3').setBackground('#E6F4EA').setFontColor('#137333').setFontWeight('bold').setFontSize(11);
 
-  sh.getRange('A4:A9').setBackground('#F1F3F4').setFontWeight('bold').setFontColor('#5F6368');
-  sh.getRange('B4:B9').setBackground('#FFFFFF');
+  sh.getRange('A4:A10').setBackground('#F1F3F4').setFontWeight('bold').setFontColor('#5F6368');
+  sh.getRange('B4:B10').setBackground('#FFFFFF');
   sh.getRange('B6').setBackground(overallColor.bg).setFontColor(overallColor.fg).setFontWeight('bold');
 
   sh.getRange('D4:H4').setBackground('#D2E3FC').setFontColor('#174EA6').setFontWeight('bold');
   sh.getRange('D5:D9').setBackground('#F8F9FA').setFontWeight('bold').setFontColor('#5F6368');
   sh.getRange('E5:E9').setHorizontalAlignment('center').setFontWeight('bold');
-  sh.getRange('F5:H9').setBackground('#F8F9FA');
+  sh.getRange('F5:H9').setBackground('#F8F9FA').setVerticalAlignment('top').setFontSize(10);
+  sh.getRange('D10:H10').setBackground('#F8F9FA').setFontColor('#5F6368').setFontSize(10);
 
   ['A11:H11','A15:H15','A22:H22','A25:H25'].forEach(r=>sh.getRange(r).setBackground('#D2E3FC').setFontColor('#174EA6').setFontWeight('bold'));
   sh.getRange('A12:H13').setBackground(overallColor.bg).setFontColor(overallColor.fg);
@@ -455,10 +462,11 @@ function sdsdRenderHome_(){
   sh.setColumnWidth(3,20);sh.setColumnWidth(4,145);sh.setColumnWidth(5,105);
   sh.setColumnWidth(6,150);sh.setColumnWidth(7,150);sh.setColumnWidth(8,150);
   sh.setRowHeight(1,36);sh.setRowHeight(2,28);
-  sh.setRowHeights(4,6,30);sh.setRowHeights(11,16,28);
+  sh.setRowHeights(4,2,30);sh.setRowHeights(6,4,42);sh.setRowHeight(10,34);sh.setRowHeights(11,16,28);
   sh.getRange('A1:H26').setBorder(false,false,false,false,false,false);
-  sh.getRange('A4:B9').setBorder(true,true,true,true,true,true,'#DADCE0',SpreadsheetApp.BorderStyle.SOLID);
-  sh.getRange('D4:H9').setBorder(true,true,true,true,true,true,'#DADCE0',SpreadsheetApp.BorderStyle.SOLID);
+  sh.getRange('A4:B10').setBorder(true,true,true,true,true,true,'#DADCE0',SpreadsheetApp.BorderStyle.SOLID);
+  sh.getRange('D4:H10').setBorder(true,true,true,true,true,true,'#DADCE0',SpreadsheetApp.BorderStyle.SOLID);
+  try{sdsdTouchDiagnosisSessionHistory_();}catch(ignoreHistoryTouch){}
 }
 
 
@@ -504,6 +512,8 @@ const SDSD_INTERNAL_SHEET_NAMES_ = Object.freeze([
   '_SDSD_PAGE_QUERY_TOP',
   '_SDSD_SBM_HISTORY',
   '_SDSD_ARTICLE_MASTER',
+  '_SDSD_DIAGNOSIS_SESSIONS',
+  '_SDSD_DIAGNOSIS_CASE_HISTORY',
   'Weekly Trend Validation',
   'Priority Validation',
   'Query Evidence Diagnostics',
@@ -551,7 +561,9 @@ function sdsdProductEnsureSheets_() {
     SDSD_CONFIG.sheets.summary,
     SDSD_CONFIG.sheets.candidates,
     SDSD_CONFIG.sheets.selectedCases,
-    SDSD_CONFIG.sheets.articleMaster
+    SDSD_CONFIG.sheets.articleMaster,
+    SDSD_CONFIG.sheets.diagnosisSessions,
+    SDSD_CONFIG.sheets.diagnosisCaseHistory
   ];
 
   names.forEach(name => {
@@ -3888,6 +3900,8 @@ const SDSD_SESSION_PROP_KEYS_ = Object.freeze([
   'SDSD_SESSION_EVIDENCE_FILE_ID',
   'SDSD_SESSION_EVIDENCE_FILE_NAME',
   'SDSD_SESSION_STARTED_AT',
+  'SDSD_SESSION_ID',
+  'SDSD_SESSION_COLLECTED_AT',
   'SDSD_LAST_EVIDENCE_FILE_ID',
   'SDSD_ACTIVE_BATCH_ID',
   'SDSD_LAST_SITE_WIDE_RESULT_AT',
@@ -3935,6 +3949,175 @@ function sdsdInferCurrentEvidenceSite_() {
   return {siteId:sdsdSiteIdFromUrl_(url), host:host, url:url};
 }
 
+
+function sdsdDiagnosisHistoryHeaders_() {
+  return [
+    'session_id','site_id','site_name','site_url','host','evidence_file_name',
+    'collected_at','started_at','last_updated_at','ended_at','status',
+    'evidence_articles','diagnosis_candidates','severe_count','priority_count',
+    'pending_total','writer_merge_creator','additional_evidence'
+  ];
+}
+
+function sdsdDiagnosisCaseHistoryHeaders_() {
+  return [
+    'session_id','site_id','captured_at','article_id','article_url',
+    'severity','diagnosis','route','status'
+  ];
+}
+
+function sdsdEnsureHistorySheet_(name, headers) {
+  const ss=SpreadsheetApp.getActive();
+  let sh=ss.getSheetByName(name);
+  if(!sh)sh=ss.insertSheet(name);
+  if(sh.getLastRow()===0){
+    sh.getRange(1,1,1,headers.length).setValues([headers]);
+    sh.setFrozenRows(1);
+  } else {
+    const current=sh.getRange(1,1,1,Math.max(sh.getLastColumn(),headers.length)).getDisplayValues()[0];
+    if(headers.some((h,i)=>String(current[i]||'')!==h)){
+      sh.getRange(1,1,1,headers.length).setValues([headers]);
+    }
+  }
+  try{sh.hideSheet();}catch(e){}
+  return sh;
+}
+
+function sdsdSessionSiteKey_(siteId,host,url) {
+  const id=String(siteId||'').trim();
+  if(id)return id.toLowerCase();
+  const h=String(host||'').trim().toLowerCase().replace(/^www\./,'');
+  if(h)return h;
+  return String(url||'').trim().toLowerCase();
+}
+
+function sdsdNewDiagnosisSessionId_(siteKey) {
+  const tz=Session.getScriptTimeZone()||'Asia/Tokyo';
+  const ts=Utilities.formatDate(new Date(),tz,'yyyyMMdd-HHmmss');
+  const token=String(siteKey||'site').replace(/[^A-Za-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40)||'site';
+  return `SDSD-${ts}-${token}`;
+}
+
+function sdsdFindSessionHistoryRow_(sessionId) {
+  if(!sessionId)return 0;
+  const sh=sdsdEnsureHistorySheet_(SDSD_CONFIG.sheets.diagnosisSessions,sdsdDiagnosisHistoryHeaders_());
+  if(sh.getLastRow()<2)return 0;
+  const vals=sh.getRange(2,1,sh.getLastRow()-1,1).getDisplayValues();
+  for(let i=vals.length-1;i>=0;i--){
+    if(String(vals[i][0]||'')===String(sessionId))return i+2;
+  }
+  return 0;
+}
+
+function sdsdUpsertDiagnosisSessionHistory_(statusOverride) {
+  const session=sdsdGetCurrentSession_();
+  if(!session.sessionId)return;
+  const metrics=sdsdHomeDiagnosisMetrics_();
+  const work=sdsdSessionWorkSummary_();
+  const headers=sdsdDiagnosisHistoryHeaders_();
+  const sh=sdsdEnsureHistorySheet_(SDSD_CONFIG.sheets.diagnosisSessions,headers);
+  const row=sdsdFindSessionHistoryRow_(session.sessionId);
+  const existing=row?sh.getRange(row,1,1,headers.length).getDisplayValues()[0]:[];
+  const endedAt=String(statusOverride||'').toUpperCase()==='ENDED'
+    ? new Date().toISOString()
+    : String(existing[9]||'');
+  const values=[[
+    session.sessionId,
+    session.siteId||'',
+    session.siteName||'',
+    session.siteUrl||'',
+    session.host||'',
+    session.evidenceFileName||'',
+    session.collectedAt||'',
+    session.startedAt||'',
+    new Date().toISOString(),
+    endedAt,
+    statusOverride||session.status||'ACTIVE',
+    session.evidenceRows||0,
+    metrics.total||0,
+    metrics.severe||0,
+    (metrics.a1||0)+(metrics.a2||0),
+    work.pendingTotal||0,
+    work.actionableTreatment||0,
+    work.additionalEvidence||0
+  ]];
+  if(row)sh.getRange(row,1,1,headers.length).setValues(values);
+  else sh.getRange(sh.getLastRow()+1,1,1,headers.length).setValues(values);
+}
+
+function sdsdTouchDiagnosisSessionHistory_() {
+  const session=sdsdGetCurrentSession_();
+  if(!session.active||!session.sessionId)return;
+  sdsdUpsertDiagnosisSessionHistory_('');
+}
+
+function sdsdPreviousDiagnosisSession_(siteKey,currentSessionId) {
+  const key=String(siteKey||'').trim().toLowerCase();
+  if(!key)return null;
+  const sh=sdsdEnsureHistorySheet_(SDSD_CONFIG.sheets.diagnosisSessions,sdsdDiagnosisHistoryHeaders_());
+  if(sh.getLastRow()<2)return null;
+  const headers=sdsdDiagnosisHistoryHeaders_();
+  const rows=sh.getRange(2,1,sh.getLastRow()-1,headers.length).getDisplayValues();
+  for(let i=rows.length-1;i>=0;i--){
+    const r=rows[i],sid=String(r[0]||''),siteId=String(r[1]||'').toLowerCase(),
+          host=String(r[4]||'').toLowerCase();
+    if(sid===String(currentSessionId||''))continue;
+    if(siteId===key||host===key)return Object.fromEntries(headers.map((h,j)=>[h,r[j]]));
+  }
+  return null;
+}
+
+function sdsdFormatSessionHistoryLabel_(r) {
+  const d=String(r.ended_at||r.last_updated_at||r.started_at||'');
+  return d ? d.replace('T',' ').slice(0,16) : '記録あり';
+}
+
+function sdsdFormatSessionHistorySummary_(r) {
+  return `前回：大きな悪化 ${r.severe_count||0}件 / 優先確認 ${r.priority_count||0}件 / 診断候補 ${r.diagnosis_candidates||0}件 / 状態 ${r.status||''}`;
+}
+
+function sdsdHistoryValue_(row,names) {
+  for(const n of names){
+    if(Object.prototype.hasOwnProperty.call(row,n)&&String(row[n]||'').trim()!=='')return String(row[n]||'').trim();
+  }
+  return '';
+}
+
+function sdsdSnapshotDiagnosisCaseHistory_() {
+  const session=sdsdGetCurrentSession_();
+  if(!session.sessionId)return;
+  const rows=sdsdReadObjects_(SDSD_CONFIG.sheets.candidates);
+  if(!rows.length)return;
+  const headers=sdsdDiagnosisCaseHistoryHeaders_();
+  const sh=sdsdEnsureHistorySheet_(SDSD_CONFIG.sheets.diagnosisCaseHistory,headers);
+
+  // Re-ending/re-saving the same session must not duplicate the snapshot.
+  if(sh.getLastRow()>=2){
+    const ids=sh.getRange(2,1,sh.getLastRow()-1,1).getDisplayValues().flat();
+    if(ids.some(x=>String(x||'')===session.sessionId))return;
+  }
+
+  const captured=new Date().toISOString();
+  const out=rows.map(r=>[
+    session.sessionId,
+    session.siteId||session.host||'',
+    captured,
+    sdsdHistoryValue_(r,['article_id','ArticleID','記事ID','記事ID（SBM）']),
+    sdsdHistoryValue_(r,['url','URL','article_url','記事URL','ページ']),
+    sdsdHistoryValue_(r,['severity','重症度','判定','優先度']),
+    sdsdHistoryValue_(r,['diagnosis','診断','診断理由','理由']),
+    sdsdHistoryValue_(r,['route_to','次の処置','処置','route']),
+    sdsdHistoryValue_(r,['status','状態'])
+  ]);
+  if(out.length)sh.getRange(sh.getLastRow()+1,1,out.length,headers.length).setValues(out);
+}
+
+function sdsdShowDiagnosisSessionHistory() {
+  sdsdProductEnsureSheets_();
+  const sh=sdsdEnsureHistorySheet_(SDSD_CONFIG.sheets.diagnosisSessions,sdsdDiagnosisHistoryHeaders_());
+  try{sh.showSheet();SpreadsheetApp.getActive().setActiveSheet(sh);}catch(e){}
+}
+
 function sdsdGetCurrentSession_() {
   const props = PropertiesService.getDocumentProperties();
   const inferred = sdsdInferCurrentEvidenceSite_();
@@ -3951,6 +4134,8 @@ function sdsdGetCurrentSession_() {
     evidenceFileId: String(props.getProperty('SDSD_SESSION_EVIDENCE_FILE_ID') || props.getProperty('SDSD_LAST_EVIDENCE_FILE_ID') || ''),
     evidenceFileName: String(props.getProperty('SDSD_SESSION_EVIDENCE_FILE_NAME') || ''),
     startedAt: String(props.getProperty('SDSD_SESSION_STARTED_AT') || ''),
+    sessionId: String(props.getProperty('SDSD_SESSION_ID') || ''),
+    collectedAt: String(props.getProperty('SDSD_SESSION_COLLECTED_AT') || ''),
     evidenceRows: evidenceRows
   };
 }
@@ -4093,6 +4278,8 @@ function sdsdEndCurrentDiagnosisSession() {
   const answer = ui.alert('現在の診断を終了', warning, ui.ButtonSet.YES_NO);
   if (answer !== ui.Button.YES) return;
 
+  try{sdsdSnapshotDiagnosisCaseHistory_();}catch(ignoreCaseHistory){}
+  try{sdsdUpsertDiagnosisSessionHistory_('ENDED');}catch(ignoreSessionHistory){}
   sdsdClearDiagnosisSessionData_();
   ui.alert(
     '現在の診断セッションを終了しました。\n\n' +
@@ -4104,15 +4291,23 @@ function sdsdEndCurrentDiagnosisSession() {
 function sdsdRegisterDiagnosisSession_(fileId, fileName, packageMeta) {
   const props = PropertiesService.getDocumentProperties();
   const info = sdsdInferCurrentEvidenceSite_();
+  const siteId=String((packageMeta&&packageMeta.siteId)||info.siteId||'');
+  const siteName=String((packageMeta&&packageMeta.siteName)||'');
+  const siteUrl=String((packageMeta&&packageMeta.siteUrl)||info.url||'');
+  const host=String(info.host||'');
+  const sessionId=sdsdNewDiagnosisSessionId_(sdsdSessionSiteKey_(siteId,host,siteUrl));
   props.setProperty('SDSD_SESSION_STATUS', 'ACTIVE');
-  props.setProperty('SDSD_SESSION_SITE_ID', String((packageMeta&&packageMeta.siteId)||info.siteId||''));
-  props.setProperty('SDSD_SESSION_SITE_NAME', String((packageMeta&&packageMeta.siteName)||''));
-  props.setProperty('SDSD_SESSION_SITE_URL', String((packageMeta&&packageMeta.siteUrl)||info.url||''));
-  props.setProperty('SDSD_SESSION_HOST', String(info.host || ''));
+  props.setProperty('SDSD_SESSION_SITE_ID', siteId);
+  props.setProperty('SDSD_SESSION_SITE_NAME', siteName);
+  props.setProperty('SDSD_SESSION_SITE_URL', siteUrl);
+  props.setProperty('SDSD_SESSION_HOST', host);
   props.setProperty('SDSD_SESSION_EVIDENCE_FILE_ID', String(fileId || ''));
   props.setProperty('SDSD_SESSION_EVIDENCE_FILE_NAME', String(fileName || ''));
   props.setProperty('SDSD_SESSION_STARTED_AT', new Date().toISOString());
-  return info;
+  props.setProperty('SDSD_SESSION_ID', sessionId);
+  props.setProperty('SDSD_SESSION_COLLECTED_AT', String((packageMeta&&packageMeta.collectedAt)||''));
+  try{sdsdUpsertDiagnosisSessionHistory_('ACTIVE');}catch(ignoreHistory){}
+  return Object.assign({},info,{sessionId:sessionId,siteId:siteId,siteName:siteName,siteUrl:siteUrl});
 }
 
 function sdsdAssertNoActiveDiagnosisSessionBeforeImport_() {
@@ -4223,7 +4418,8 @@ function sdsdImportEvidencePackageById_(fileId){
   const packageMeta={
     siteName:String(site.siteName||site.site_name||''),
     siteUrl:String(site.siteUrl||site.site_url||site.searchConsoleProperty||''),
-    siteId:''
+    siteId:'',
+    collectedAt:String(manifest.generated_at||manifest.generatedAt||manifest.collected_at||manifest.collectedAt||'')
   };
   if(packageMeta.siteUrl)packageMeta.siteId=sdsdSiteIdFromUrl_(packageMeta.siteUrl);
 
@@ -4730,7 +4926,9 @@ function sdsdEnsureSheets_() {
     SDSD_CONFIG.sheets.sbmHistory,
     SDSD_CONFIG.sheets.candidates,
     SDSD_CONFIG.sheets.selectedCases,
-    SDSD_CONFIG.sheets.articleMaster
+    SDSD_CONFIG.sheets.articleMaster,
+    SDSD_CONFIG.sheets.diagnosisSessions,
+    SDSD_CONFIG.sheets.diagnosisCaseHistory
   ];
   names.forEach(name => {
     let sh = ss.getSheetByName(name);
