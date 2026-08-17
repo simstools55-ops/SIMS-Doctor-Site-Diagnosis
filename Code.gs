@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.8.3';
+const SDSD_VERSION = '0.8.4';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -1729,6 +1729,66 @@ function sdsdSbmMergePlanFromCase_(c) {
   };
 }
 
+function sdsdSbmCaseSignature_(c, batchId) {
+  c = c || {};
+  const sourceRoute = String(c.route_to || '').toUpperCase();
+  const creatorKeyword = String(
+    (c.new_article_target && c.new_article_target.candidate_keyword) ||
+    (c.creator_plan && c.creator_plan.candidate_keyword) ||
+    ''
+  ).trim().toLowerCase();
+  const urls = (Array.isArray(c.target_articles) ? c.target_articles : [])
+    .map(a => typeof a === 'string' ? a : (a && (a.article_url || a.url) || ''))
+    .map(sdsdNormalizeUrl_).filter(Boolean).sort();
+  const stable = {
+    batch_id:String(batchId || ''),
+    diagnosis_case_id:String(c.diagnosis_case_id || ''),
+    route_to:sourceRoute,
+    diagnosis_theme:String(c.diagnosis_theme || '').trim().toLowerCase(),
+    creator_keyword:creatorKeyword,
+    article_urls:urls
+  };
+  const digest = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    JSON.stringify(stable),
+    Utilities.Charset.UTF_8
+  );
+  return digest.map(b => ('0' + ((b + 256) % 256).toString(16)).slice(-2)).join('');
+}
+
+function sdsdGetCompletedSbmCaseSignatures_() {
+  const raw = String(PropertiesService.getDocumentProperties()
+    .getProperty('SDSD_SBM_COMPLETED_CASE_SIGNATURES') || '[]');
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.map(String).filter(Boolean) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function sdsdRememberCompletedSbmCases_() {
+  const result = sdsdReadStoredSiteWideResult_();
+  const batchId = String(result.site_diagnosis_batch_id || sdsdSiteWideBatchId_() || '');
+  const done = {};
+  sdsdGetCompletedSbmCaseSignatures_().forEach(x => done[x] = true);
+  (result.diagnosis_cases || []).forEach(c => {
+    const route = String(c.route_to || '').toUpperCase();
+    if (!route || route === 'NEEDS_EVIDENCE') return;
+    done[sdsdSbmCaseSignature_(c, batchId)] = true;
+  });
+  PropertiesService.getDocumentProperties().setProperty(
+    'SDSD_SBM_COMPLETED_CASE_SIGNATURES',
+    JSON.stringify(Object.keys(done))
+  );
+}
+
+function sdsdIsSbmCaseAlreadyHandedOff_(c, batchId) {
+  const done = {};
+  sdsdGetCompletedSbmCaseSignatures_().forEach(x => done[x] = true);
+  return !!done[sdsdSbmCaseSignature_(c, batchId)];
+}
+
 function sdsdBuildSbmSiteDiagnosisHandoff_() {
   const result = sdsdReadStoredSiteWideResult_();
   const storedSite = result.site || {};
@@ -1744,6 +1804,9 @@ function sdsdBuildSbmSiteDiagnosisHandoff_() {
   (result.diagnosis_cases || []).forEach((c, i) => {
     const sourceRoute = String(c.route_to || '').toUpperCase();
     if (!sourceRoute || sourceRoute === 'NEEDS_EVIDENCE') return;
+    // v0.8.4: a case already confirmed as registered in SBM must not revive
+    // when the same Doctor result is imported again.
+    if (sdsdIsSbmCaseAlreadyHandedOff_(c, batchId)) return;
 
     const route = sdsdSbmHandoffRoute_(sourceRoute);
     const articles = (Array.isArray(c.target_articles) ? c.target_articles : [])
@@ -1887,7 +1950,12 @@ function sdsdIsSbmHandoffCurrent_() {
   // Older versions did not persist a payload fingerprint. Force one fresh handoff
   // so newly-created Creator cases in an existing diagnosis session are not skipped.
   if (!saved) return false;
-  try { return saved === sdsdSbmHandoffFingerprint_(); } catch (e) { return false; }
+  try { return saved === sdsdSbmHandoffFingerprint_(); } catch (e) {
+    // When every actionable case is already in the completed-case ledger,
+    // buildSbm... intentionally has nothing left to hand off.
+    if (String(e && e.message || '').indexOf('SBMへ引き渡す確定案件がありません') >= 0) return true;
+    return false;
+  }
 }
 
 function sdsdShowSbmHandoffDialog_() {
@@ -1923,6 +1991,7 @@ function sdsdMarkSbmHandoffComplete() {
 function sdsdMarkSbmHandoffComplete_() {
   const props = PropertiesService.getDocumentProperties();
   props.setProperty('SDSD_SBM_HANDOFF_FINGERPRINT', sdsdSbmHandoffFingerprint_());
+  sdsdRememberCompletedSbmCases_();
   sdsdSetSbmHandoffState_('COMPLETE');
   try {
     const stored = sdsdReadStoredSiteWideResult_();
@@ -3838,6 +3907,7 @@ const SDSD_SESSION_PROP_KEYS_ = Object.freeze([
   'SDSD_SBM_HANDOFF_STATUS',
   'SDSD_SBM_HANDOFF_AT',
   'SDSD_SBM_HANDOFF_FINGERPRINT',
+  'SDSD_SBM_COMPLETED_CASE_SIGNATURES',
   'SDSD_SITE_WIDE_REGISTER_STAGE',
   'SDSD_SITE_WIDE_REGISTER_DETAIL',
   'SDSD_SITE_WIDE_REGISTER_AT'
