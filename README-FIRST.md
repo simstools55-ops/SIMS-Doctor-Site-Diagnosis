@@ -1,15 +1,10 @@
-# SIMS Doctor Site Diagnosis v0.8.2 Patch
+# SIMS Doctor Site Diagnosis v0.8.3
 
-Base: v0.8.1
+Changed runtime file: Code.gs
 
-Fixes the post-generation checkpoint for individual precision diagnosis.
+- Preserve Doctor precision-result allowed_scope / blocked_scope from cluster or root workflow_handoff.
+- Refuse to generate an unsafe Writer handoff when allowed_scope is still missing.
+- Fill site_id / site_name / site_url from the imported article master when the stored Doctor result leaves them blank.
+- Precision Doctor referral now explicitly requires Writer treatment scopes.
 
-After a Doctor ZIP has been generated, `1. Site Diagnosisを進める` now recognizes
-`PACKAGE_READY_FOR_DOCTOR` before considering new eligible articles. It displays the
-existing filename and a Google Drive link and explicitly asks the user to give the ZIP
-to SIMS Doctor.
-
-`Doctorへ依頼しました` records the next checkpoint as `WAITING_DOCTOR_RESULT`.
-
-This prevents accidental regeneration of the completed package and separates:
-package generated -> Doctor requested -> Doctor result / SBM registration.
+Replace Code.gs in the Apps Script project, save, and reopen the spreadsheet.

@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.8.2';
+const SDSD_VERSION = '0.8.3';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -1731,7 +1731,13 @@ function sdsdSbmMergePlanFromCase_(c) {
 
 function sdsdBuildSbmSiteDiagnosisHandoff_() {
   const result = sdsdReadStoredSiteWideResult_();
-  const site = result.site || {};
+  const storedSite = result.site || {};
+  const fallbackSite = sdsdSiteMetaFromArticleMaster_();
+  const site = {
+    site_id: String(storedSite.site_id || fallbackSite.site_id || ''),
+    site_name: String(storedSite.site_name || fallbackSite.site_name || ''),
+    site_url: String(storedSite.site_url || fallbackSite.site_url || '')
+  };
   const batchId = String(result.site_diagnosis_batch_id || sdsdSiteWideBatchId_() || '');
   const clusters = [];
 
@@ -1757,10 +1763,14 @@ function sdsdBuildSbmSiteDiagnosisHandoff_() {
       route_to: route,
       source_route_to: sourceRoute,
       articles: articles,
-      allowed_scope: c.treatment_plan && Array.isArray(c.treatment_plan.allowed_scope)
-        ? c.treatment_plan.allowed_scope : [],
-      blocked_scope: c.treatment_plan && Array.isArray(c.treatment_plan.blocked_scope)
-        ? c.treatment_plan.blocked_scope : [],
+      allowed_scope: Array.isArray(c.allowed_scope) && c.allowed_scope.length
+        ? c.allowed_scope
+        : (c.treatment_plan && Array.isArray(c.treatment_plan.allowed_scope)
+          ? c.treatment_plan.allowed_scope : []),
+      blocked_scope: Array.isArray(c.blocked_scope) && c.blocked_scope.length
+        ? c.blocked_scope
+        : (c.treatment_plan && Array.isArray(c.treatment_plan.blocked_scope)
+          ? c.treatment_plan.blocked_scope : []),
       internal_link_recommendations: Array.isArray(c.internal_link_recommendations)
         ? c.internal_link_recommendations : [],
       presentation: c.presentation || null,
@@ -1779,6 +1789,13 @@ function sdsdBuildSbmSiteDiagnosisHandoff_() {
           }
         : null
     };
+
+    if (route === 'WRITER' && !clusterResult.allowed_scope.length) {
+      throw new Error(
+        `Writer案件にDoctorのallowed_scopeがありません：${c.diagnosis_theme || c.diagnosis_case_id || (i+1)}。` +
+        ' Doctor精密診断結果のworkflow_handoff.allowed_scopeまたはクラスタ別allowed_scopeを確認してください。'
+      );
+    }
 
     if (sourceRoute === 'MERGE') {
       const mergePlan = sdsdSbmMergePlanFromCase_(c);
@@ -7242,6 +7259,8 @@ function sdsdPrecisionReferralText_(siteResult, cases) {
     '',
     '- 元の site_diagnosis_batch_id と diagnosis_case_id を保持してください。',
     '- 各クラスタの最終 route_to は WRITER / MERGE / MONITOR / NO_ACTION / NEEDS_EVIDENCE のいずれか。',
+    '- WRITERへ送る場合は、Writerが変更してよい範囲を allowed_scope、変更禁止範囲を blocked_scope として必ず返してください。',
+    '- 複数クラスタで治療範囲が共通なら、ルート直下 workflow_handoff.allowed_scope / blocked_scope を共通既定値として返しても構いません。',
     '- 不足Evidenceが残る場合だけ NEEDS_EVIDENCE としてください。',
     ''
   ].join('\n');
@@ -7659,6 +7678,42 @@ function sdsdMergePlanText_(mergePlan) {
   };
 }
 
+
+function sdsdPrecisionScopeArray_(obj, key) {
+  if (!obj) return [];
+  const direct = obj[key];
+  if (Array.isArray(direct) && direct.length) return direct.slice();
+
+  const handoff = obj.workflow_handoff || {};
+  const h = handoff[key];
+  if (Array.isArray(h) && h.length) return h.slice();
+
+  const plan = obj.treatment_plan || {};
+  const p = plan[key];
+  if (Array.isArray(p) && p.length) return p.slice();
+
+  return [];
+}
+
+function sdsdPrecisionResolveScopes_(root, cluster, cr, group) {
+  const allowedCandidates = [
+    sdsdPrecisionScopeArray_(group, 'allowed_scope'),
+    sdsdPrecisionScopeArray_(cr, 'allowed_scope'),
+    sdsdPrecisionScopeArray_(cluster, 'allowed_scope'),
+    sdsdPrecisionScopeArray_(root, 'allowed_scope')
+  ];
+  const blockedCandidates = [
+    sdsdPrecisionScopeArray_(group, 'blocked_scope'),
+    sdsdPrecisionScopeArray_(cr, 'blocked_scope'),
+    sdsdPrecisionScopeArray_(cluster, 'blocked_scope'),
+    sdsdPrecisionScopeArray_(root, 'blocked_scope')
+  ];
+
+  const allowed = allowedCandidates.find(a => a.length) || [];
+  const blocked = blockedCandidates.find(a => a.length) || [];
+  return {allowed_scope:allowed.slice(), blocked_scope:blocked.slice()};
+}
+
 function sdsdConvertPrecisionResult_(obj) {
   const out = [];
   (obj.clusters || []).forEach((cluster, ci) => {
@@ -7694,8 +7749,22 @@ function sdsdConvertPrecisionResult_(obj) {
         ? sdsdMergePlanText_(mergePlan)
         : {survivor:'',absorbed:'',direction:'',content_to_absorb:''};
 
-      const treatmentPlan =
+      const treatmentPlanRaw =
         g.treatment_plan || cr.treatment_plan || cluster.treatment_plan || null;
+      const scopes = sdsdPrecisionResolveScopes_(obj, cluster, cr, g);
+      const treatmentPlan = treatmentPlanRaw
+        ? Object.assign({}, treatmentPlanRaw, {
+            allowed_scope: scopes.allowed_scope.length
+              ? scopes.allowed_scope
+              : (Array.isArray(treatmentPlanRaw.allowed_scope) ? treatmentPlanRaw.allowed_scope : []),
+            blocked_scope: scopes.blocked_scope.length
+              ? scopes.blocked_scope
+              : (Array.isArray(treatmentPlanRaw.blocked_scope) ? treatmentPlanRaw.blocked_scope : [])
+          })
+        : {
+            allowed_scope: scopes.allowed_scope,
+            blocked_scope: scopes.blocked_scope
+          };
 
       out.push({
         diagnosis_case_id: caseId,
@@ -7727,6 +7796,8 @@ function sdsdConvertPrecisionResult_(obj) {
             ? cluster.additional_evidence_needed.map(String) : []),
         precision_group_type: groupLabel,
         treatment_plan: treatmentPlan,
+        allowed_scope: scopes.allowed_scope,
+        blocked_scope: scopes.blocked_scope,
         internal_link_recommendations: Array.isArray(cluster.internal_link_recommendations)
           ? cluster.internal_link_recommendations : [],
         merge_plan: mergePlan || null,

@@ -1,11 +1,9 @@
 # CHANGELOG
 
-## v0.8.2
-- Fixed completed individual Doctor ZIP not being recognized by the workflow controller.
-- Added PACKAGE_READY_FOR_DOCTOR workflow checkpoint.
-- Added generated filename and Google Drive link.
-- Added explicit `Doctorへ依頼しました` state transition.
-- Prevented accidental ZIP regeneration after 9/9 completion.
+## v0.8.3
 
-## v0.8.1
-- Fixed split preparation resume: 3/9 -> 6/9 -> 9/9.
+- Fixed Site-wide Precision Result scope loss during Diagnosis normalization.
+- Root `workflow_handoff.allowed_scope / blocked_scope` now acts as a safe default for Writer clusters.
+- Cluster/group scope values take precedence over root defaults.
+- Added Diagnosis-side pre-handoff validation for Writer `allowed_scope`.
+- Added Article Master fallback for site identity in SBM handoff JSON.
