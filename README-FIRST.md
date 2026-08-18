@@ -1,4 +1,16 @@
-# SIMS Doctor Site Diagnosis v0.10.1
+# SIMS Doctor Site Diagnosis v0.10.2
+
+## v0.10.2 — Complete Site-wide Doctor result contract
+
+Changed runtime file: `Code.gs`
+
+- Site-wide Doctor packages now require the complete `diagnosis_cases[]` list.
+- Doctor may no longer omit remaining clusters, return only top-priority examples, or defer the rest to another file.
+- Diagnosis validates that every source Case in the Package is covered by `absorbed_source_case_ids`.
+- Incomplete results are rejected before they overwrite the stored Site Diagnosis result.
+- Return destination must be `SIMS_DOCTOR_SITE_DIAGNOSIS`.
+
+Replace `Code.gs`, update `VERSION`, save, and reopen the spreadsheet. `appsscript.json` is unchanged.
 
 ## v0.10.1 — Real-site scale / routing hotfix
 

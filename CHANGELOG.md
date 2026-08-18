@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## v0.10.2
+
+- Strengthened the Site-wide Doctor return contract to require complete `diagnosis_cases[]` output with no omitted clusters.
+- Added result completeness metadata (`result_complete`, returned/omitted counts) to the Doctor referral contract.
+- Added strict validation for truncated Doctor responses, including `cluster_count` mismatch and explicit remaining-case notes.
+- Added full source-case coverage validation: every input `case_id` must be covered by `diagnosis_cases[].absorbed_source_case_ids`.
+- Added return-destination validation so site-wide results cannot be routed back to SBM.
+- Added response-contract metadata to `manifest.json`.
+
 ## v0.10.1
 
 - Added chunked persistence for Doctor site-wide responses exceeding the 50,000-character Google Sheets cell limit.

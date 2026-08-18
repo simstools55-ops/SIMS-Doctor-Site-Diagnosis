@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.10.1';
+const SDSD_VERSION = '0.10.2';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -6152,6 +6152,14 @@ function sdsdBuildSiteWideDoctorPackageManifest_(rows) {
     site_summary: summary,
     case_count: rows.length,
     case_counts: counts,
+    response_contract: {
+      format: 'SIMS_DOCTOR_SITE_WIDE_RESULT_V1',
+      contract_version: '1.1',
+      return_to: 'SIMS_DOCTOR_SITE_DIAGNOSIS',
+      full_case_coverage_required: true,
+      omitted_case_count_must_be_zero: true,
+      source_case_count: rows.length
+    },
     cases: rows.map(x => ({
       case_id: x.case_id,
       improvement_type: x.improvement_type,
@@ -6186,7 +6194,7 @@ function sdsdBuildSiteWideDoctorInstructions_(rows) {
     '',
     '## 出力してほしいもの',
     '',
-    '- 返却JSON format は SIMS_DOCTOR_SITE_WIDE_RESULT_V1 としてください。\n- 返却先は **SIMS Doctor Site Diagnosis** です。SBMへ直接返さないでください。利用者はDiagnosisの「Doctor診断結果を取り込む」から回答全文またはJSONを登録します。\n- 回答の最後には、Diagnosisが機械取込できる有効なJSONを必ず出力してください。説明文だけで終了したり、「JSONは上記の通り」などとしてJSON本体を省略したりしないでください。出力量が多い場合は説明文を短くしても、JSON本体を優先してください。\n- 可能なら diagnosis_cases[] の正規形式で返してください。難しい場合は priority_queue_for_precision_diagnosis / content_gap_merged_into_existing_theme / sbm_routine_queue_high_confidence_standalone / low_priority_monitor_medium_confidence_single_query / creator_candidates_pending_cannibalization_check の一次トリアージ形式でも受け付けます。\n- サイト全体の総合診断',
+    '- 返却JSON format は SIMS_DOCTOR_SITE_WIDE_RESULT_V1、contract_version は **1.1** としてください。\n- 返却先は **SIMS Doctor Site Diagnosis** です。SBMへ直接返さないでください。利用者はDiagnosisの「Doctor診断結果を取り込む」から回答全文またはJSONを登録します。\n- 回答の最後には、Diagnosisが機械取込できる有効なJSONを必ず出力してください。説明文だけで終了したり、「JSONは上記の通り」などとしてJSON本体を省略したりしないでください。\n- **diagnosis_cases[] は全クラスタ・全案件を省略せず返してください。代表例のみ、上位案件のみ、残りは割愛、別ファイルで渡す、必要なら後で出す、という返し方は禁止です。**\n- 入力Caseを統合した場合も、全入力 case_id をいずれかの diagnosis_cases[].absorbed_source_case_ids に必ず含めてください。Diagnosisは入力Caseの全件被覆を検証します。\n- JSONには result_complete:true、returned_diagnosis_case_count、omitted_diagnosis_case_count:0 を必ず含めてください。cluster_count を返す場合は diagnosis_cases.length と一致させてください。\n- 出力量が大きい場合は説明文を最小限または省略し、**JSON全件返却を最優先**してください。JSONを短くするため、理由文は簡潔で構いません。\n- このPackageでは一次トリアージ形式ではなく diagnosis_cases[] の正規形式を使用してください。\n- サイト全体の総合診断',
     '- 優先して処置すべき案件',
     '- 各案件の最終振り分け（MONITOR / Writer / Merge / Creator / 追加Evidence）',
     '- 共通原因がある場合は、案件横断でまとめて説明',
@@ -6196,7 +6204,10 @@ function sdsdBuildSiteWideDoctorInstructions_(rows) {
     '',
     '{',
     '  "format": "SIMS_DOCTOR_SITE_WIDE_RESULT_V1",',
-    '  "contract_version": "1.0",',
+    '  "contract_version": "1.1",',
+    '  "result_complete": true,',
+    '  "returned_diagnosis_case_count": 0,',
+    '  "omitted_diagnosis_case_count": 0,',
     '  "site_diagnosis_batch_id": "...",',
     '  "site": {"site_id":"...","site_name":"...","site_url":"..."},',
     '  "overall_diagnosis": "...",',
@@ -6216,7 +6227,8 @@ function sdsdBuildSiteWideDoctorInstructions_(rows) {
     '      "reason": "...",',
     '      "additional_evidence_needed": []',
     '    }',
-    '  ]',
+    '  ],',
+    '  "workflow": {"return_to":"SIMS_DOCTOR_SITE_DIAGNOSIS","not_returned_directly_to":"SBM"}',
     '}',
     ''
   ].join('\n');
@@ -8101,6 +8113,95 @@ function sdsdConvertPrecisionResult_(obj) {
   return out;
 }
 
+function sdsdValidateSiteWideResultCompleteness_(obj) {
+  if (!obj || !Array.isArray(obj.diagnosis_cases)) return true;
+
+  const contractVersion = String(obj.contract_version || '1.0');
+  const strictV11 = /^1\.(?:[1-9]|\d{2,})$/.test(contractVersion) || /^([2-9]|\d{2,})\./.test(contractVersion);
+  const cases = obj.diagnosis_cases;
+
+  if (obj.result_complete === false) {
+    throw new Error('Doctor結果が未完了です。diagnosis_cases を全件返し、result_complete:true で再出力してください。');
+  }
+
+  const omitted = Number(obj.omitted_diagnosis_case_count || 0);
+  if (Number.isFinite(omitted) && omitted > 0) {
+    throw new Error(`Doctor結果で ${omitted}件が省略されています。省略なしの完全な diagnosis_cases を再出力してください。`);
+  }
+
+  const remainingNote = String(
+    obj.note_on_remaining_diagnosis_cases ||
+    obj.remaining_diagnosis_cases_note ||
+    obj.omission_note ||
+    ''
+  ).trim();
+  if (remainingNote) {
+    throw new Error('Doctor結果に「残り案件」の注記があります。代表案件だけでなく、全 diagnosis_cases を省略せず返してください。');
+  }
+
+  const clusterCount = Number(obj.cluster_count);
+  if (Number.isFinite(clusterCount) && clusterCount > 0 && cases.length !== clusterCount) {
+    throw new Error(`Doctor結果が不完全です。cluster_count=${clusterCount} に対して diagnosis_cases は ${cases.length}件です。全クラスタを返してください。`);
+  }
+
+  const returnedCount = Number(obj.returned_diagnosis_case_count);
+  if (Number.isFinite(returnedCount) && returnedCount > 0 && returnedCount !== cases.length) {
+    throw new Error(`returned_diagnosis_case_count=${returnedCount} と diagnosis_cases=${cases.length}件が一致しません。`);
+  }
+
+  if (strictV11) {
+    if (obj.result_complete !== true) {
+      throw new Error('contract_version 1.1 では result_complete:true が必須です。Doctorへ完全結果を再出力させてください。');
+    }
+    if (!Number.isFinite(returnedCount) || returnedCount !== cases.length) {
+      throw new Error(`contract_version 1.1 では returned_diagnosis_case_count=${cases.length} を明示してください。`);
+    }
+    if (!Number.isFinite(Number(obj.omitted_diagnosis_case_count)) || Number(obj.omitted_diagnosis_case_count) !== 0) {
+      throw new Error('contract_version 1.1 では omitted_diagnosis_case_count:0 が必須です。');
+    }
+  }
+
+  const workflow = obj.workflow || {};
+  const returnTo = String(workflow.return_to || obj.return_to || '').trim();
+  if (returnTo && returnTo !== 'SIMS_DOCTOR_SITE_DIAGNOSIS') {
+    throw new Error(`返却先が不正です: ${returnTo}。Doctor結果は SIMS_DOCTOR_SITE_DIAGNOSIS へ返してください。`);
+  }
+
+  // Strongest completeness check: every source Case currently in the site-wide
+  // package must be covered exactly by the union of absorbed_source_case_ids.
+  // This catches "top N only" responses even when cluster_count is omitted.
+  if (strictV11) {
+    let sourceRows = [];
+    try { sourceRows = sdsdSiteWidePackageRows_(); } catch(e) { sourceRows = []; }
+    if (sourceRows.length) {
+      const expected = {};
+      sourceRows.forEach(r => { if (r && r.case_id) expected[String(r.case_id)] = true; });
+
+      const covered = {};
+      cases.forEach(c => {
+        (Array.isArray(c.absorbed_source_case_ids) ? c.absorbed_source_case_ids : [])
+          .forEach(id => { if (id) covered[String(id)] = true; });
+      });
+
+      const missing = Object.keys(expected).filter(id => !covered[id]);
+      const unknown = Object.keys(covered).filter(id => !expected[id]);
+      if (missing.length) {
+        const preview = missing.slice(0, 8).join(', ');
+        throw new Error(
+          `Doctor結果が一部省略されています。入力Case ${Object.keys(expected).length}件のうち ` +
+          `${Object.keys(expected).length - missing.length}件しか被覆されていません。未返却 ${missing.length}件` +
+          `${preview ? `（例: ${preview}）` : ''}。全入力 case_id を diagnosis_cases[].absorbed_source_case_ids へ含めて再出力してください。`
+        );
+      }
+      if (unknown.length) {
+        const preview = unknown.slice(0, 8).join(', ');
+        throw new Error(`Doctor結果にPackage外のcase_idが含まれています${preview ? `（例: ${preview}）` : ''}。元Packageとの突合を確認してください。`);
+      }
+    }
+  }
+  return true;
+}
+
 function sdsdValidateSiteWideResult_(obj) {
   const isTriage = !!(obj && obj.format === 'SIMS_DOCTOR_SITE_WIDE_RESULT_V1');
   const isPrecision = sdsdIsSiteWidePrecisionResult_(obj);
@@ -8144,6 +8245,7 @@ function sdsdValidateSiteWideResult_(obj) {
       if (!Array.isArray(c.absorbed_source_case_ids)) throw new Error(`diagnosis_cases[${i}] に absorbed_source_case_ids がありません。`);
       if (!allowed[String(c.route_to || '')]) throw new Error(`diagnosis_cases[${i}] の route_to が不正です: ${c.route_to}`);
     });
+    sdsdValidateSiteWideResultCompleteness_(obj);
   }
   return true;
 }
