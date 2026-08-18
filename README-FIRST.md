@@ -1,4 +1,16 @@
-# SIMS Doctor Site Diagnosis v0.10.2
+# SIMS Doctor Site Diagnosis v0.10.3
+
+## v0.10.3 — Precision MIXED article routing
+
+Changed runtime file: `Code.gs`
+
+- Precision results can safely represent a cluster with different article-level actions using `route_to: MIXED` plus mandatory `articles[].route_to`.
+- Diagnosis expands the cluster into concrete final routes and never stores MIXED as a treatment route.
+- Article-level MERGE target data is converted to the existing Merge handoff plan.
+- Original `site_diagnosis_case_id` is preserved during conversion.
+- MIXED without complete article-level routing is rejected at VALIDATE.
+
+Replace `Code.gs`, update `VERSION`, save, and reopen the spreadsheet. `appsscript.json` is unchanged.
 
 ## v0.10.2 — Complete Site-wide Doctor result contract
 

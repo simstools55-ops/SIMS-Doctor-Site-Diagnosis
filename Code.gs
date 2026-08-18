@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.10.2';
+const SDSD_VERSION = '0.10.3';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -7560,7 +7560,10 @@ function sdsdPrecisionReferralText_(siteResult, cases) {
     '## 返却',
     '',
     '- 元の site_diagnosis_batch_id と diagnosis_case_id を保持してください。',
-    '- 各クラスタの最終 route_to は WRITER / MERGE / MONITOR / NO_ACTION / NEEDS_EVIDENCE のいずれか。',
+    '- 各クラスタの最終 route_to は原則 WRITER / MERGE / MONITOR / NO_ACTION / NEEDS_EVIDENCE のいずれか。',
+    '- 同一クラスタ内で記事ごとに処置先が異なる場合に限り、クラスタ route_to を MIXED とし、articles[].route_to に各記事の最終ルートを必ず明示してください。',
+    '- MIXEDなのに articles[].route_to が無い形式は禁止です。全記事が同じルートならMIXEDを使わず、そのルートをクラスタ route_to に設定してください。',
+    '- MERGE対象記事は merge_target_url（可能なら merge_target_title も）を対象articleに必ず返してください。Diagnosisが記事単位の処置へ展開します。',
     '- WRITERへ送る場合は、Writerが変更してよい範囲を allowed_scope、変更禁止範囲を blocked_scope として必ず返してください。',
     '- 複数クラスタで治療範囲が共通なら、ルート直下 workflow_handoff.allowed_scope / blocked_scope を共通既定値として返しても構いません。',
     '- 不足Evidenceが残る場合だけ NEEDS_EVIDENCE としてください。',
@@ -7932,6 +7935,92 @@ function sdsdPrecisionArticles_(group, cluster) {
   return Array.isArray(cluster.target_articles) ? cluster.target_articles : [];
 }
 
+function sdsdPrecisionArticleRoute_(article) {
+  return String(
+    article && (
+      article.route_to || article.next_action || article.doctor_route ||
+      article.treatment_route || ''
+    ) || ''
+  ).toUpperCase();
+}
+
+function sdsdPrecisionArticleIdentity_(article) {
+  article = article || {};
+  return {
+    site_id: String(article.site_id || ''),
+    article_id: String(article.article_id || ''),
+    article_title: String(article.article_title || article.title || ''),
+    article_url: String(article.article_url || article.url || '')
+  };
+}
+
+/**
+ * v0.10.3: Precision Doctor results may legitimately contain more than one
+ * treatment route inside a single cluster. Doctor can express this as
+ * route_to=MIXED with explicit articles[].route_to values. Diagnosis expands
+ * that cluster into concrete treatment cases before validation/registration.
+ */
+function sdsdPrecisionGroups_(cluster, cr) {
+  cluster = cluster || {};
+  cr = cr || {};
+
+  if (Array.isArray(cr.sub_groups) && cr.sub_groups.length) {
+    return cr.sub_groups;
+  }
+
+  const clusterRoute = String(cr.route_to || cluster.route_to || '').toUpperCase();
+  if (clusterRoute !== 'MIXED') return [cr];
+
+  const articles = sdsdPrecisionArticles_(cr, cluster);
+  const grouped = {};
+  const order = [];
+
+  articles.forEach(article => {
+    const route = sdsdPrecisionArticleRoute_(article);
+    if (!route) return;
+    if (!grouped[route]) {
+      grouped[route] = [];
+      order.push(route);
+    }
+    grouped[route].push(article);
+  });
+
+  return order.map(route => {
+    const routeArticles = grouped[route];
+    const group = {
+      route_to: route,
+      group_type: `ARTICLE_ROUTE_${route}`,
+      group_name: route,
+      articles: routeArticles,
+      diagnosis_theme: cluster.diagnosis_theme || cluster.theme || '',
+      reason: routeArticles.map(a => String(a.diagnosis_summary || a.reason || '')).filter(Boolean).join(' / ')
+    };
+
+    // A Doctor result can identify the absorbed article directly on the
+    // article row with merge_target_url/title. Convert it to the canonical
+    // merge_plan shape used by the existing Merge handoff logic.
+    if (route === 'MERGE' && routeArticles.length) {
+      const source = routeArticles.find(a => a.merge_target_url || a.merge_target_article_url) || routeArticles[0];
+      const targetUrl = String(source.merge_target_url || source.merge_target_article_url || '');
+      if (targetUrl) {
+        group.merge_plan = {
+          source_article: sdsdPrecisionArticleIdentity_(source),
+          target_article: {
+            site_id: String(source.site_id || cluster.site_id || ''),
+            article_id: String(source.merge_target_article_id || ''),
+            article_title: String(source.merge_target_title || source.merge_target_article_title || ''),
+            article_url: targetUrl
+          },
+          redirect_direction: `${String(source.article_url || source.url || '')} → ${targetUrl}`,
+          content_to_absorb: String(source.content_to_absorb || '')
+        };
+      }
+    }
+
+    return group;
+  });
+}
+
 
 function sdsdMergePlanArticles_(mergePlan) {
   mergePlan = mergePlan || {};
@@ -8020,15 +8109,13 @@ function sdsdConvertPrecisionResult_(obj) {
   const out = [];
   (obj.clusters || []).forEach((cluster, ci) => {
     const cr = cluster.cluster_result || cluster.result || {};
-    const groups = Array.isArray(cr.sub_groups) && cr.sub_groups.length
-      ? cr.sub_groups
-      : [cr];
+    const groups = sdsdPrecisionGroups_(cluster, cr);
 
     groups.forEach((g, gi) => {
       const route = String(g.route_to || cr.route_to || cluster.route_to || '').toUpperCase();
       if (!route) return;
 
-      const baseId = String(cluster.diagnosis_case_id || cluster.case_id || `PRECISION-${ci+1}`);
+      const baseId = String(cluster.site_diagnosis_case_id || cluster.diagnosis_case_id || cluster.case_id || `PRECISION-${ci+1}`);
       const caseId = groups.length > 1 ? `${baseId}#${gi+1}` : baseId;
       const groupLabel = String(g.group_type || g.group_name || g.name || '');
       const diagnosisTheme = String(
@@ -8216,6 +8303,19 @@ function sdsdValidateSiteWideResult_(obj) {
     if (!Array.isArray(obj.clusters) || !obj.clusters.length) {
       throw new Error('Precision Result に clusters がありません。');
     }
+    obj.clusters.forEach((cluster, i) => {
+      const cr = cluster.cluster_result || cluster.result || {};
+      const rawRoute = String(cr.route_to || cluster.route_to || '').toUpperCase();
+      if (rawRoute !== 'MIXED') return;
+      const articles = sdsdPrecisionArticles_(cr, cluster);
+      if (!articles.length) {
+        throw new Error(`Precision Result のMIXEDクラスタにarticlesがありません (${i+1})`);
+      }
+      const missing = articles.filter(a => !sdsdPrecisionArticleRoute_(a));
+      if (missing.length) {
+        throw new Error(`Precision Result のMIXEDクラスタでは全articles[].route_toが必須です (${i+1}, 未指定${missing.length}件)`);
+      }
+    });
     const converted = sdsdConvertPrecisionResult_(obj);
     if (!converted.length) {
       throw new Error('Precision Result から最終処置ルートを取得できません。clusters[].cluster_result.sub_groups[].route_to を確認してください。');

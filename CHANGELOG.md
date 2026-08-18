@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## v0.10.3
+
+- Added safe article-level routing for Precision Result clusters that use `route_to: MIXED`.
+- MIXED clusters are expanded into concrete final routes from `articles[].route_to`; MIXED itself is never stored.
+- Added validation that every article in a MIXED cluster has an explicit route.
+- Added conversion of article-level MERGE target fields into the existing canonical Merge plan.
+- Preserved `site_diagnosis_case_id` when converting Precision Result clusters.
+- Updated Precision Doctor referral instructions to define the MIXED contract.
+
 ## v0.10.2
 
 - Strengthened the Site-wide Doctor return contract to require complete `diagnosis_cases[]` output with no omitted clusters.
