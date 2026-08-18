@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v0.9.0
+## v0.10.0
 
 - Added Diagnosis Session History v1 keyed by site_id/host.
 - Added hidden `_SDSD_DIAGNOSIS_SESSIONS` and `_SDSD_DIAGNOSIS_CASE_HISTORY` stores.

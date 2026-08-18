@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.9.0';
+const SDSD_VERSION = '0.10.0';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {

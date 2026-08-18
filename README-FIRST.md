@@ -9,7 +9,7 @@ Changed runtime file: Code.gs
 
 Replace Code.gs in the Apps Script project, save, and reopen the spreadsheet.
 
-## v0.9.0
+## v0.10.0
 
 - Home「サイト全体の分析結果」コメント欄の表示領域を拡張し、見切れを改善。
 - `site_id` / host 単位で Diagnosis Session History v1 を保存。
