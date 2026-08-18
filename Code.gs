@@ -1,7 +1,7 @@
 // ============================================================================
 // Source: SiteDiagnosisConfig.gs
 // ============================================================================
-const SDSD_VERSION = '0.10.0';
+const SDSD_VERSION = '0.10.1';
 
 const SDSD_CONFIG = Object.freeze({
   sheets: {
@@ -82,7 +82,7 @@ function onOpen() {
   const otherMenu = ui.createMenu('設定・管理')
     .addItem('現在の診断状況を確認', 'sdsdShowCurrentSessionStatus')
     .addItem('診断セッション履歴を見る', 'sdsdShowDiagnosisSessionHistory')
-    .addItem('現在の診断を終了', 'sdsdEndCurrentDiagnosisSession')
+    .addItem('次のブログへ切り替える（現在の診断を終了）', 'sdsdEndCurrentDiagnosisSession')
     .addSeparator()
     .addItem('ZIP保存先', 'sdsdChooseOutputFolder')
     .addSeparator()
@@ -3586,6 +3586,21 @@ function sdsdSafeSiteToken_() {
   return token || 'site';
 }
 
+
+// User-facing generated package names may contain the blog name.
+// Remove only characters that are unsafe/confusing in Drive file names while
+// preserving Japanese and other readable site-name characters.
+function sdsdSafeDisplaySiteToken_() {
+  const session = sdsdGetCurrentSession_();
+  let token = String(session.siteName || session.siteId || session.host || 'site').trim();
+  token = token.normalize ? token.normalize('NFKC') : token;
+  token = token.replace(/^https?:\/\//i,'').replace(/^www\./i,'');
+  token = token.replace(/[\\/:*?"<>|\u0000-\u001F]+/g,'-');
+  token = token.replace(/\s+/g,' ').replace(/^-+|-+$/g,'').replace(/-+/g,'-');
+  if (token.length > 60) token = token.slice(0,60).trim();
+  return token || sdsdSafeSiteToken_();
+}
+
 function sdsdShowGuidedActionDialog_(o) {
   o=o||{};
   const esc=v=>String(v==null?'':v)
@@ -3618,16 +3633,17 @@ function sdsdShowGuidedActionDialog_(o) {
 function sdsdShowSiteWideDoctorResultDialog() {
   const html='<!doctype html><html><head><base target="_top"><style>'+ 
     'body{font-family:Arial,"Noto Sans JP",sans-serif;margin:0;background:#f8fafd;color:#202124}.wrap{padding:20px}.hero{background:#185abc;color:#fff;padding:16px 18px;border-radius:10px}.hero h2{margin:0 0 6px;font-size:20px}.hero p{margin:0;font-size:13px;line-height:1.6}.card{background:#fff;border:1px solid #dadce0;border-radius:10px;margin-top:14px;padding:14px}textarea{width:100%;height:260px;box-sizing:border-box;border:1px solid #bdc1c6;border-radius:7px;padding:10px;font-family:monospace}.actions{text-align:right;margin-top:12px}button{border:1px solid #dadce0;background:#fff;border-radius:6px;padding:9px 14px;cursor:pointer;margin-left:6px}button.primary{background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:bold}.status{margin-top:8px;color:#5f6368;font-size:12px}'+
-    '</style></head><body><div class="wrap"><div class="hero"><h2>Doctor診断結果を取り込む</h2><p>Doctorの回答をDiagnosisへ戻し、治療計画またはCreator候補の次工程を決めます。</p></div><div class="card"><b>Doctor回答全文を貼り付けてください</b><p style="font-size:12px;color:#5f6368">横断診断・サイト横断精密診断のどちらでも、回答全文またはJSONをそのまま貼り付けられます。</p><textarea id="t" placeholder="Doctor回答全文またはJSONを貼り付け"></textarea><div class="status" id="s"></div></div><div class="actions"><button onclick="google.script.host.close()">キャンセル</button><button class="primary" id="go">診断結果を取り込む</button></div></div><script>document.getElementById("go").onclick=()=>{const t=document.getElementById("t").value.trim(),b=document.getElementById("go"),s=document.getElementById("s");if(!t){s.textContent="Doctor回答を貼り付けてください。";return;}b.disabled=true;s.textContent="取り込んでいます...";google.script.run.withSuccessHandler(()=>{s.textContent="取り込みを開始しました。";setTimeout(()=>google.script.host.close(),700);}).withFailureHandler(e=>{b.disabled=false;s.textContent=(e&&e.message)?e.message:String(e||"エラー");}).sdsdRegisterSiteWideDoctorResultText(t);};</script></body></html>';
+    '</style></head><body><div class="wrap"><div class="hero"><h2>Doctor診断結果を取り込む</h2><p>Doctorの回答をDiagnosisへ戻し、治療計画またはCreator候補の次工程を決めます。</p></div><div class="card"><b>Doctor回答全文を貼り付けてください</b><p style="font-size:12px;color:#5f6368">横断診断・サイト横断精密診断のどちらでも、回答全文またはJSONをそのまま貼り付けられます。50,000文字を超える長い回答も自動分割して安全に保存します。</p><textarea id="t" placeholder="Doctor回答全文またはJSONを貼り付け"></textarea><div class="status" id="s"></div></div><div class="actions"><button onclick="google.script.host.close()">キャンセル</button><button class="primary" id="go">診断結果を取り込む</button></div></div><script>document.getElementById("go").onclick=()=>{const t=document.getElementById("t").value.trim(),b=document.getElementById("go"),s=document.getElementById("s");if(!t){s.textContent="Doctor回答を貼り付けてください。";return;}b.disabled=true;s.textContent="取り込んでいます...";google.script.run.withSuccessHandler(()=>{s.textContent="取り込みを開始しました。";setTimeout(()=>google.script.host.close(),700);}).withFailureHandler(e=>{b.disabled=false;s.textContent=(e&&e.message)?e.message:String(e||"エラー");}).sdsdRegisterSiteWideDoctorResultText(t);};</script></body></html>';
   SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(html).setWidth(720).setHeight(590),'Doctor診断結果を取り込む');
 }
 
 function sdsdRegisterSiteWideDoctorResultText(text) {
   const t=String(text||'').trim();
   if(!t) throw new Error('Doctor回答が空です。');
-  const sh=sdsdEnsureSiteWideResultImportSheet_();
-  if(sh.getLastRow()>=2)sh.getRange(2,1,Math.max(sh.getLastRow()-1,1),1).clearContent();
-  sh.getRange('A2').setValue(t);
+  // Google Sheets limits one cell to 50,000 characters. Keep the familiar
+  // one-paste workflow, but persist long Doctor responses over multiple rows.
+  const saved=sdsdStoreSiteWideResultImportText_(t);
+  sdsdSetSiteWideRegisterStage_('INPUT_SAVED', `入力文字数: ${saved.charCount} / 分割: ${saved.chunkCount}セル`);
   return sdsdRegisterSiteWideDoctorResult();
 }
 
@@ -4246,6 +4262,9 @@ function sdsdClearDiagnosisSessionData_() {
 
   const props = PropertiesService.getDocumentProperties();
   SDSD_SESSION_PROP_KEYS_.forEach(k => props.deleteProperty(k));
+  // A site-wide batch id belongs to one diagnosis session/site only.
+  // Keeping it across sites can cause cross-site result collisions.
+  props.deleteProperty('SDSD_SITE_WIDE_BATCH_ID');
 }
 
 function sdsdEndCurrentDiagnosisSession() {
@@ -4275,14 +4294,14 @@ function sdsdEndCurrentDiagnosisSession() {
   }
 
   warning += '現在の診断を終了して、次のサイトを診断できる状態にしますか？';
-  const answer = ui.alert('現在の診断を終了', warning, ui.ButtonSet.YES_NO);
+  const answer = ui.alert('次のブログへ切り替える', warning, ui.ButtonSet.YES_NO);
   if (answer !== ui.Button.YES) return;
 
   try{sdsdSnapshotDiagnosisCaseHistory_();}catch(ignoreCaseHistory){}
   try{sdsdUpsertDiagnosisSessionHistory_('ENDED');}catch(ignoreSessionHistory){}
   sdsdClearDiagnosisSessionData_();
   ui.alert(
-    '現在の診断セッションを終了しました。\n\n' +
+    '現在の診断セッションを終了しました。次のブログへ切り替えられます。\n\n' +
     '作業データをクリアしました。\n' +
     '別サイトを診断するときは、メニュー最上段の「▶ 次に進む（Diagnosisに任せる）」から開始できます。'
   );
@@ -4290,6 +4309,8 @@ function sdsdEndCurrentDiagnosisSession() {
 
 function sdsdRegisterDiagnosisSession_(fileId, fileName, packageMeta) {
   const props = PropertiesService.getDocumentProperties();
+  // New Evidence = new diagnosis session. Never reuse another site's site-wide batch id.
+  props.deleteProperty('SDSD_SITE_WIDE_BATCH_ID');
   const info = sdsdInferCurrentEvidenceSite_();
   const siteId=String((packageMeta&&packageMeta.siteId)||info.siteId||'');
   const siteName=String((packageMeta&&packageMeta.siteName)||'');
@@ -6018,10 +6039,11 @@ function sdsdSiteMetaFromArticleMaster_() {
     siteUrl = m ? m[1] + '/' : '';
   }
 
+  const session = sdsdGetCurrentSession_();
   return {
-    site_id: siteId,
-    site_name: siteName,
-    site_url: siteUrl
+    site_id: siteId || String(session.siteId || ''),
+    site_name: siteName || String(session.siteName || ''),
+    site_url: siteUrl || String(session.siteUrl || '')
   };
 }
 
@@ -6164,7 +6186,7 @@ function sdsdBuildSiteWideDoctorInstructions_(rows) {
     '',
     '## 出力してほしいもの',
     '',
-    '- 返却JSON format は SIMS_DOCTOR_SITE_WIDE_RESULT_V1 としてください。\n- 返却先はSBMの単体診断登録欄ではありません。利用者はSite Diagnosisの「サイト横断の診断・治療 → 5. Doctor診断結果を登録」から登録します。\n- 可能なら diagnosis_cases[] の正規形式で返してください。難しい場合は priority_queue_for_precision_diagnosis / content_gap_merged_into_existing_theme / sbm_routine_queue_high_confidence_standalone / low_priority_monitor_medium_confidence_single_query / creator_candidates_pending_cannibalization_check の一次トリアージ形式でも受け付けます。\n- サイト全体の総合診断',
+    '- 返却JSON format は SIMS_DOCTOR_SITE_WIDE_RESULT_V1 としてください。\n- 返却先は **SIMS Doctor Site Diagnosis** です。SBMへ直接返さないでください。利用者はDiagnosisの「Doctor診断結果を取り込む」から回答全文またはJSONを登録します。\n- 回答の最後には、Diagnosisが機械取込できる有効なJSONを必ず出力してください。説明文だけで終了したり、「JSONは上記の通り」などとしてJSON本体を省略したりしないでください。出力量が多い場合は説明文を短くしても、JSON本体を優先してください。\n- 可能なら diagnosis_cases[] の正規形式で返してください。難しい場合は priority_queue_for_precision_diagnosis / content_gap_merged_into_existing_theme / sbm_routine_queue_high_confidence_standalone / low_priority_monitor_medium_confidence_single_query / creator_candidates_pending_cannibalization_check の一次トリアージ形式でも受け付けます。\n- サイト全体の総合診断',
     '- 優先して処置すべき案件',
     '- 各案件の最終振り分け（MONITOR / Writer / Merge / Creator / 追加Evidence）',
     '- 共通原因がある場合は、案件横断でまとめて説明',
@@ -6254,7 +6276,7 @@ function sdsdExportSiteWideDoctorPackage() {
     });
 
     const zipName =
-      `SIMS-Doctor-Site-Wide-Diagnosis-${sdsdSafeSiteToken_()}-${Utilities.formatDate(
+      `SIMS-Diagnosis-to-Doctor-${sdsdSafeDisplaySiteToken_()}-Site-Wide-Diagnosis-${Utilities.formatDate(
         new Date(),
         Session.getScriptTimeZone() || 'Asia/Tokyo',
         'yyyyMMdd-HHmmss'
@@ -7647,7 +7669,7 @@ function sdsdExportPriorityPrecisionClusterPackage() {
     ));
 
     const zipName =
-      `SIMS-Doctor-Site-Wide-Precision-${sdsdSafeSiteToken_()}-${Utilities.formatDate(
+      `SIMS-Diagnosis-to-Doctor-${sdsdSafeDisplaySiteToken_()}-Site-Wide-Precision-${Utilities.formatDate(
         new Date(),
         Session.getScriptTimeZone() || 'Asia/Tokyo',
         'yyyyMMdd-HHmmss'
@@ -8348,6 +8370,32 @@ function sdsdEnsureSiteWideResultImportSheet_() {
   return sh;
 }
 
+const SDSD_SITE_WIDE_IMPORT_CHUNK_MARKER_ = 'SDSD_CHUNKED_V1';
+const SDSD_SITE_WIDE_IMPORT_CHUNK_SIZE_ = 40000;
+
+function sdsdSplitTextForSheet_(text, chunkSize) {
+  const src = String(text || '');
+  const size = Math.max(1000, Number(chunkSize || SDSD_SITE_WIDE_IMPORT_CHUNK_SIZE_));
+  const out = [];
+  for (let i = 0; i < src.length; i += size) out.push(src.slice(i, i + size));
+  return out.length ? out : [''];
+}
+
+function sdsdStoreSiteWideResultImportText_(text) {
+  const sh = sdsdEnsureSiteWideResultImportSheet_();
+  const src = String(text || '');
+  const chunks = sdsdSplitTextForSheet_(src, SDSD_SITE_WIDE_IMPORT_CHUNK_SIZE_);
+
+  if (sh.getLastRow() >= 2) {
+    sh.getRange(2,1,Math.max(sh.getLastRow()-1,1),1).clearContent();
+  }
+  sh.getRange('B1').setValue(SDSD_SITE_WIDE_IMPORT_CHUNK_MARKER_);
+  sh.getRange('B2').setValue(src.length);
+  sh.getRange(2,1,chunks.length,1).setValues(chunks.map(x => [x]));
+  sh.getRange(2,1,chunks.length,1).setWrap(true);
+  return {charCount:src.length, chunkCount:chunks.length};
+}
+
 function sdsdReadSiteWideResultImportText_() {
   const sh = sdsdEnsureSiteWideResultImportSheet_();
   const last = Math.max(sh.getLastRow(), 2);
@@ -8363,7 +8411,8 @@ function sdsdReadSiteWideResultImportText_() {
     return true;
   });
 
-  return cleaned.join('\n').trim();
+  const isChunked = String(sh.getRange('B1').getValue() || '') === SDSD_SITE_WIDE_IMPORT_CHUNK_MARKER_;
+  return (isChunked ? cleaned.join('') : cleaned.join('\n')).trim();
 }
 
 function sdsdSetSiteWideRegisterStage_(stage, detail) {
@@ -8378,6 +8427,7 @@ function sdsdClearSiteWideResultImport_() {
   if (sh.getLastRow() >= 2) {
     sh.getRange(2,1,Math.max(sh.getLastRow()-1,1),1).clearContent();
   }
+  sh.getRange('B1:B2').clearContent();
   sh.getRange('A2').setValue(
     'このセル以下に、Doctor回答全文、SIMS_DOCTOR_SITE_WIDE_RESULT_V1 または SIMS_DOCTOR_SITE_WIDE_PRECISION_RESULT_V1 JSON を貼り付けてください。\n' +
     '貼り付け後、メニュー最上段の「▶ 次に進む（Diagnosisに任せる）」を実行してください。'

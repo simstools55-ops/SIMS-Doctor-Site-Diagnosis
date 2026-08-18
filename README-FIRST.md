@@ -1,4 +1,17 @@
-# SIMS Doctor Site Diagnosis v0.8.3
+# SIMS Doctor Site Diagnosis v0.10.1
+
+## v0.10.1 — Real-site scale / routing hotfix
+
+Changed runtime file: `Code.gs`
+
+- Doctor results longer than 50,000 characters are automatically split across cells and reconstructed for import.
+- Site-wide batch IDs no longer carry over to the next blog.
+- Doctor return destination is explicitly Diagnosis, not SBM.
+- Site-wide package filenames identify From→To, blog name, purpose, and timestamp.
+- The next-blog session-end menu wording is clearer.
+
+Replace `Code.gs`, update `VERSION`, save, and reopen the spreadsheet. `appsscript.json` is unchanged.
+
 
 Changed runtime file: Code.gs
 

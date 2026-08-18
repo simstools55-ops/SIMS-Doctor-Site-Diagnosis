@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## v0.10.1
+
+- Added chunked persistence for Doctor site-wide responses exceeding the 50,000-character Google Sheets cell limit.
+- Prevented site-wide batch ID reuse across diagnosis sessions/sites.
+- Added active-session fallback for site identity in site-wide Doctor packages.
+- Corrected Doctor referral return destination to SIMS Doctor Site Diagnosis and made JSON output mandatory.
+- Renamed generated site-wide Doctor packages to include From→To, readable site name, purpose, and timestamp.
+- Clarified the menu action used to finish the current site and switch to the next blog.
+
 ## v0.10.0
 
 - Added Diagnosis Session History v1 keyed by site_id/host.
